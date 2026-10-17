@@ -18,7 +18,7 @@ def is_supported(device):
     endpoint = getattr(device, "endpoints", {}).get(RPC_ENDPOINT)
     return (
         "shelly" in manufacturer
-        and model in {"s4dm-0a101wwl", "shellydimmerg4", "shelly dimmer gen4"}
+        and model in {"dimmer", "s4dm-0a101wwl", "shellydimmerg4", "shelly dimmer gen4"}
         and endpoint is not None
         and endpoint.profile_id == 0xC001
         and RPC_CLUSTER in endpoint.in_clusters

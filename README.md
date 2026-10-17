@@ -1,4 +1,4 @@
-# Shelly Zigbee Calibration · 0.1.0
+# Shelly Zigbee Calibration · 0.1.1
 
 Kleine benutzerdefinierte Home-Assistant-Integration für **Shelly Dimmer Gen4**:
 Sie ergänzt am vorhandenen ZHA-Gerät den Button **„Kalibrierung starten“**.
@@ -91,7 +91,7 @@ laufende Kalibrierung erneut zu starten.
 - Integration wird nicht gefunden: Ordnerstruktur prüfen, Core neu starten,
   Browserseite neu laden und das Protokoll prüfen.
 - Kein Dimmer gefunden: Unterstützt wird der europäische Dimmer Gen4 mit
-  Modell `S4DM-0A101WWL` sowie den Modellnamen `ShellyDimmerG4` und
+  Modell `S4DM-0A101WWL` sowie den Zigbee-Modellnamen `Dimmer`, `ShellyDimmerG4` und
   `Shelly Dimmer Gen4`. Er muss bei ZHA gekoppelt sein und auf Endpunkt 239
   den RPC-Cluster `0xFC01` mit Profil `0xC001` anbieten. Andere Dimmer und
   Shelly-Relais werden absichtlich nicht ausgewählt.

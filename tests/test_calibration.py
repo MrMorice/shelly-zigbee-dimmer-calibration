@@ -277,3 +277,23 @@ async def test_busy_button_rejects_concurrent_press():
     async with entity._lock:
         with pytest.raises(HomeAssistantError, match="läuft bereits"):
             await entity.async_press()
+
+
+@pytest.mark.parametrize("model", ["Dimmer", "S4DM-0A101WWL", "ShellyDimmerG4", "Shelly Dimmer Gen4"])
+def test_supported_zigbee_and_product_model_names(model):
+    device = FakeDevice()
+    device.model = model
+    assert is_supported(device)
+
+
+@pytest.mark.parametrize("change", ["manufacturer", "cluster", "endpoint"])
+def test_real_dimmer_name_still_requires_shelly_rpc(change):
+    device = FakeDevice()
+    device.model = "Dimmer"
+    if change == "manufacturer":
+        device.manufacturer = "Other manufacturer"
+    elif change == "cluster":
+        device.endpoints[239].in_clusters = {}
+    else:
+        del device.endpoints[239]
+    assert not is_supported(device)
