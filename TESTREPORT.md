@@ -2,7 +2,7 @@
 
 - Home Assistant Core: **2026.10.2**, Python 3.14.4
 - ZHA: **2.3.1**, zha-quirks: **2.3.0**, zigpy: **2.3.0**
-- **73 Tests bestanden**, keine fehlgeschlagenen Tests.
+- **80 Tests bestanden**, keine fehlgeschlagenen Tests.
 - Fünf Deprecation-Warnungen stammen aus Home Assistant und backoff.
 
 Geprüft wurden Zigbee-Nachrichten mit echten zigpy-ZCL-Serialisierern,
@@ -72,3 +72,15 @@ Die native Vorschau schreibt Einstellungen bereits während des Versuchs.
 Offline-/Stromausfall-Rücksetzung kann erst nach Wiederherstellung der Verbindung
 und erneutem Öffnen des Assistenten abgeschlossen werden. Die Tests bestätigen
 keine erfolgreich über Funk ausgeführte Gerätekonfiguration.
+
+
+Version 0.2.1 ergänzt sieben Tests für die Gerätebedienung: Alle acht Entitäten
+(automatischer Kalibrierungsbutton, sechs Assistentenknöpfe und Statussensor)
+verweisen auf denselben bestehenden ZHA-Geräteeintrag und verwenden keine
+neue DeviceInfo. Geprüft sind Mindestwertsuche und Speichern, native
+Gamma-Anpassungen und Abbruch, Rücksetzung nach fehlgeschlagener Anpassung,
+Wiederherstellung einer unterbrochenen Sitzung ohne neue Vorschau,
+Statusaktualisierung nach Freigabe der Sitzungssperre und Schutz eines
+laufenden Versuchs vor einem zweiten Start. Die Einordnung in den Bereich
+Konfiguration wird über EntityCategory.CONFIG vorgegeben; ein visueller Test
+im Browser des Green wurde nicht durchgeführt.

@@ -10,6 +10,7 @@ from homeassistant.util import dt as dt_util
 from zigpy.exceptions import ZigbeeException
 
 from .const import COOLDOWN_SECONDS
+from .device_controls import control_buttons
 from .helpers import get_registered_device, resolve_device
 from .rpc import RpcError, ShellyRpc
 
@@ -18,7 +19,11 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     ieee = entry.data["ieee"]
-    async_add_entities([CalibrationButton(ieee, get_registered_device(hass, ieee), runtime=entry.runtime_data)])
+    device = get_registered_device(hass, ieee)
+    entities = [CalibrationButton(ieee, device, runtime=entry.runtime_data)]
+    if entry.runtime_data is not None:
+        entities.extend(control_buttons(ieee, device, entry.runtime_data))
+    async_add_entities(entities)
 
 
 class CalibrationButton(ButtonEntity):

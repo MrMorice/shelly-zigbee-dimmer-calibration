@@ -25,6 +25,8 @@ class DimmingRuntime:
         self.pending = None
         self.source = None
         self.hardware_until = 0.0
+        self.listeners = set()
+        self.last_error = None
         self.wizard = DimmingWizard(self)
 
     async def load(self):
@@ -47,6 +49,14 @@ class DimmingRuntime:
         if time.monotonic() < self.hardware_until:
             raise WizardError("Die automatische Kalibrierung könnte noch laufen. Bitte warten.")
         self.source = self.resolve_source()
+        await self.recover()
+        state = self.hass.states.get(self.source)
+        if state is None or state.state not in {"on", "off"}:
+            raise WizardError("Die ZHA-Lichtsteuerung ist gerade nicht erreichbar")
+        self.curve = await self.read_curve()
+        self.last_error = None
+
+    async def recover(self):
         if self.pending is not None:
             if self.pending.get("source") != self.source:
                 raise WizardError("Die ursprüngliche Lichtsteuerung wurde geändert. Wiederherstellung prüfen.")
@@ -54,10 +64,6 @@ class DimmingRuntime:
             await self.apply(original)
             await self.restore(self.pending["snapshot"])
             await self.finish(original)
-        state = self.hass.states.get(self.source)
-        if state is None or state.state not in {"on", "off"}:
-            raise WizardError("Die ZHA-Lichtsteuerung ist gerade nicht erreichbar")
-        self.curve = await self.read_curve()
 
     async def snapshot(self):
         state = self.hass.states.get(self.source)
@@ -121,5 +127,15 @@ class DimmingRuntime:
     async def close(self):
         await self.wizard.cancel()
 
+    def notify(self):
+        # Entity availability checks the wizard lock, so publish after it releases.
+        self.hass.loop.call_soon(self._notify_listeners)
+
+    def _notify_listeners(self):
+        for listener in tuple(self.listeners):
+            listener()
+
     def report_error(self, message):
+        self.last_error = message
+        self.notify()
         _LOGGER.warning("Dimmkurven-Assistent: %s", message)

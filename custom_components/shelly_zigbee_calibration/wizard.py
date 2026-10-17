@@ -34,6 +34,11 @@ class DimmingWizard:
         self._sweep_task = None
         self._timeout_task = None
 
+    def _notify(self):
+        notify = getattr(self.backend, "notify", None)
+        if notify is not None:
+            notify()
+
     async def start(self, mode):
         if mode not in {"minimum", "gamma"}:
             raise WizardError("Unbekannter Einstellungsmodus")
@@ -64,6 +69,7 @@ class DimmingWizard:
             self._timeout_task = asyncio.create_task(self._expire())
             if mode == "gamma":
                 self._sweep_task = asyncio.create_task(self._sweep())
+            self._notify()
             return self.token
 
     def _require(self, token):
@@ -82,6 +88,7 @@ class DimmingWizard:
             await self.backend.output(1.0)
             self.candidate = candidate
             self.level = 1.0
+            self._notify()
 
     async def adjust_gamma(self, token, delta):
         async with self.lock:
@@ -94,6 +101,7 @@ class DimmingWizard:
                 await self.backend.apply(candidate)
             await self.backend.output(self.level)
             self.candidate = candidate
+            self._notify()
 
     async def save(self, token):
         async with self.lock:
@@ -126,6 +134,8 @@ class DimmingWizard:
         except Exception as exc:
             self.error = f"Wiederherstellung nicht abgeschlossen: {exc}"
             raise WizardError(self.error) from exc
+        finally:
+            self._notify()
 
     async def _expire(self):
         await asyncio.sleep(self.timeout)

@@ -6,7 +6,7 @@ from .helpers import get_registered_device, migrate_button_device, resolve_devic
 
 from .runtime import DimmingRuntime
 
-PLATFORMS = [Platform.BUTTON]
+PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
 
 
 async def async_setup_entry(hass, entry):

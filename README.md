@@ -1,4 +1,4 @@
-# Shelly Zigbee Calibration · 0.2.0
+# Shelly Zigbee Calibration · 0.2.1
 
 <img src="https://raw.githubusercontent.com/MrMorice/shelly-zigbee-dimmer-calibration/main/custom_components/shelly_zigbee_calibration/brand/icon%402x.png" alt="Frontaler 3D-Dimmer mit hellem Hintergrund und Kalibrierungsskala" width="128">
 
@@ -34,25 +34,39 @@ Die Integrationsverwaltung zeigt weiterhin den installierten Eintrag
 
 ## Mindesthelligkeit und Gamma direkt im Shelly
 
-Neu ab **0.2.0**: Unter **Einstellungen → Geräte & Dienste → Shelly Zigbee
-Calibration → Konfigurieren** öffnet sich der Assistent. Es entstehen weder
-ein zusätzliches Gerät noch eine zweite Licht-Entität. Die Einstellungen
-werden über den Shelly-RPC-Cluster ausschließlich per **Zigbee** übertragen.
+Ab **0.2.1** bedienst du den Assistenten direkt auf der **vorhandenen
+Shelly-Geräteseite in ZHA → Konfiguration**. Es entstehen weder ein
+zusätzliches Gerät noch eine zweite Licht-Entität. Die Einstellungen werden
+über den Shelly-RPC-Cluster ausschließlich per **Zigbee** übertragen.
 Die bestehende ZHA-Lichtsteuerung wird für die Helligkeitsvorschau verwendet.
 
-1. Nach dem Update in HACS Home Assistant neu starten. Ist kein Update sichtbar,
-   über das HACS-Menü erneut herunterladen und `main` auswählen.
-2. **Konfigurieren → Mindesthelligkeit finden** wählen. Der Assistent liest
-   zuerst `Light.GetConfig` und sichert die bisherigen Werte. Die native
-   Untergrenze beginnt im Versuch bei 0 %, die Lampe wird bei 1 % angefordert.
-3. Auf **Etwas heller (+0,5 %)** tippen, bis die Lampe zuverlässig leuchtet.
-   Mit **Etwas dunkler** kann der Wert wieder reduziert werden.
-   **Diesen Mindestwert speichern** behält die ermittelte Untergrenze.
-4. Erneut **Konfigurieren → Gamma-Kurve ausprobieren** öffnen. Die Lampe fährt
-   wiederholt von dunkel nach hell und zurück. Ein Zyklus dauert ungefähr
-   25 Sekunden zuzüglich Zigbee-Übertragungszeit.
-5. Mit **Mehr Gamma (+0,1)** und **Weniger Gamma (−0,1)** den Verlauf vergleichen.
-   **Diese Kurve speichern** behält die gewählten Einstellungen.
+1. Nach dem Update auf **0.2.1** in HACS Home Assistant neu starten. Ist kein
+   Update sichtbar, über das HACS-Menü erneut herunterladen und `main` auswählen.
+2. **Einstellungen → Geräte & Dienste → Geräte → deinen vorhandenen Shelly**
+   öffnen und den Bereich **Konfiguration** aufklappen.
+3. **Mindesthelligkeit suchen** drücken. Der Assistent liest zuerst
+   `Light.GetConfig` und sichert die bisherigen Werte. Die native Untergrenze
+   beginnt im Versuch bei 0 %, die Lampe wird bei 1 % angefordert.
+4. **Dimmwert erhöhen (+)** erhöht die Untergrenze um 0,5 %, **Dimmwert senken (−)**
+   reduziert sie entsprechend. Sobald die Lampe zuverlässig leuchtet,
+   **Dimmwerte speichern** drücken. **Dimmkurven-Status** zeigt den aktuellen Wert.
+5. **Gamma-Vorschau starten** drücken. Die Lampe fährt wiederholt von dunkel
+   nach hell und zurück. Ein Zyklus dauert ungefähr 25 Sekunden zuzüglich
+   Zigbee-Übertragungszeit. Die Knöpfe **Dimmwert erhöhen (+)** und
+   **Dimmwert senken (−)** verändern jetzt Gamma jeweils um 0,1.
+6. **Dimmwerte speichern** behält die Werte. **Dimmversuch abbrechen** verwirft
+   die Vorschau und stellt die vorherigen Werte wieder her. Der Status zeigt
+   Fehler und ausstehende Wiederherstellungen an; Details stehen in den
+   Attributen des Statusfelds. Inaktive Bedienknöpfe sind ausgegraut.
+
+Der ursprüngliche Button **Kalibrierung starten** bleibt für die automatische
+Einmessung bestehen. Er ist von der manuellen Dimmkurven-Einstellung unabhängig.
+
+Alternativ bleibt der Dialog aus 0.2.0 unter **Einstellungen → Geräte & Dienste →
+Shelly Zigbee Calibration → Konfigurieren** verfügbar. Beide Oberflächen
+bedienen denselben Versuch: Speichern oder Abbrechen auf einer Oberfläche
+beendet ihn auch für die andere. Der Shelly ist weiterhin ein ZHA-Gerät;
+die Zusatzintegration legt keinen eigenen Dimmer an.
 
 Es werden die nativen Einstellungen `range_map` und `gamma` verändert,
 keine Kurve in Home Assistant nachgebildet. Die bisherige Obergrenze bleibt
@@ -82,9 +96,10 @@ RPC-Leseprobleme können den Assistenten also auch bei deinem Shelly verhindern.
 **Bei einem unterbrochenen Versuch:** Die ursprünglichen Werte werden vor der
 ersten Änderung in Home Assistant gesichert. Ist der Shelly beim Abbrechen
 offline oder fällt Home Assistant aus, kann die Vorschau-Einstellung im
-Shelly bleiben. Den Shelly wieder erreichbar machen und **Konfigurieren →
-Mindesthelligkeit finden** oder **Gamma-Kurve ausprobieren** erneut öffnen:
-Der Assistent stellt zunächst den gesicherten Zustand wieder her. Bei einem
+Shelly bleiben. Den Shelly wieder erreichbar machen und am Gerät **Dimmversuch abbrechen**
+drücken: Die gesicherten Werte werden wiederhergestellt, ohne einen neuen
+Versuch zu starten. Auch das Starten eines neuen Versuchs bzw. erneute Öffnen
+des Optionsdialogs stellt zunächst den gesicherten Zustand wieder her. Bei einem
 Core-Neustart allein werden keine Lampen oder Shelly-Einstellungen geändert.
 Die Sicherung wird erst nach bestätigter Wiederherstellung bzw. erfolgreichem
 Speichern gelöscht. Solange eine Wiederherstellung aussteht, bleibt der
@@ -154,6 +169,8 @@ Die Dateien müssen so liegen, ohne einen zusätzlichen ZIP-Ordner dazwischen:
       curve.py
       runtime.py
       wizard.py
+      device_controls.py
+      sensor.py
       const.py
       helpers.py
       rpc.py
