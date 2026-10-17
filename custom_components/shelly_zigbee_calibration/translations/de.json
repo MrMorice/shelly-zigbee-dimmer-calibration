@@ -1,0 +1,22 @@
+{
+  "title": "Shelly Zigbee Calibration",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Shelly für Kalibrierung auswählen",
+        "description": "Ergänzt einen Kalibrierungsbutton am vorhandenen ZHA-Gerät. Die Einrichtung startet keine Kalibrierung. Bei Betätigung verändert sich die Lampenhelligkeit für bis zu zwei Minuten.",
+        "data": {
+          "ieee": "Shelly Dimmer Gen4"
+        }
+      }
+    },
+    "error": {
+      "device_missing": "Das ausgewählte Gerät ist nicht mehr verfügbar."
+    },
+    "abort": {
+      "already_configured": "Für diesen Dimmer ist bereits ein Button eingerichtet.",
+      "zha_not_ready": "ZHA ist noch nicht bereit. ZHA starten und erneut versuchen.",
+      "no_devices": "Kein unterstützter Shelly Dimmer Gen4 gefunden. Das Gerät muss in ZHA gekoppelt sein und den Shelly-RPC-Cluster auf Endpunkt 239 anbieten."
+    }
+  }
+}
