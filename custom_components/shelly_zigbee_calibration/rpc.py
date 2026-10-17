@@ -148,6 +148,57 @@ class ShellyRpc:
             raise RpcError("Ungültiger Shelly-RPC-Antworttyp")
         return frame
 
+    async def call(self, method, params):
+        """Execute RPC and require its matching application-level response.
+
+        Configuration must never use the calibration-only fire-and-forget path.
+        A ZCL write success alone cannot establish RPC acceptance.
+        """
+        request_id = uuid.uuid4().int & 0x7FFFFFFF
+        source = "ha-dim-" + uuid.uuid4().hex[:8]
+        payload = json.dumps({"id": request_id, "src": source,
+            "method": method, "params": params}, separators=(",", ":"),
+            ensure_ascii=True).encode("ascii")
+        self.may_have_started = False
+        self._received_headers = []
+        self.app.add_listener(self)
+        try:
+            self.phase = method + ": TxCtl schreiben"
+            await self._write(1, 0x23, struct.pack("<I", len(payload)))
+            for offset in range(0, len(payload), 40):
+                chunk = payload[offset:offset + 40]
+                self.phase = method + ": Data schreiben"
+                if offset + len(chunk) == len(payload):
+                    self.may_have_started = True
+                await self._write(0, 0x42, bytes([len(chunk)]) + chunk)
+            self.phase = method + ": RPC-Antwort lesen"
+            async with asyncio.timeout(self.response_timeout):
+                stale = 0
+                while True:
+                    size = await self._read(2, 0x23)
+                    if not size:
+                        await asyncio.sleep(0.25)
+                        continue
+                    frame = await self._read_frame(size)
+                    if frame.get("id") != request_id or frame.get("dst") != source:
+                        stale += 1
+                        if stale > 8:
+                            raise RpcError("Zu viele fremde RPC-Antworten")
+                        continue
+                    if "error" in frame:
+                        raise RpcError("Shelly-RPC-Fehler: " + json.dumps(frame["error"], ensure_ascii=False))
+                    if "result" not in frame:
+                        raise RpcError("Shelly-RPC-Antwort enthält kein Ergebnis")
+                    return frame["result"]
+        except TimeoutError as exc:
+            raise RpcError(
+                f"Keine vollständige Zigbee-RPC-Antwort bei {self.phase}. "
+                "Für den Assistenten müssen Shelly-Einstellungen über Zigbee lesbar sein. "
+                "Bei fehlenden Antworten ist die Wiederherstellung nicht bestätigt."
+            ) from exc
+        finally:
+            self.app.remove_listener(self)
+
     async def calibrate(self, *, confirm=False):
         """Send calibration once; optionally read an RPC reply for diagnostics.
 

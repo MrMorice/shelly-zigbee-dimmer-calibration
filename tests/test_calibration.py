@@ -37,6 +37,7 @@ class FakeDevice(ListenableMixin):
         self.write_failure = False
         self.stale = False
         self.actual_reply = None
+        self.rpc_handler = lambda rpc: None
 
     def get_sequence(self):
         self.sequence = (self.sequence + 1) % 256
@@ -71,7 +72,7 @@ class FakeDevice(ListenableMixin):
                         rpc = json.loads(self.tx)
                         self.rpc_requests.append(rpc)
                         frame = {"id": rpc["id"], "dst": rpc["src"], "src": "shellydimmerg4-test"}
-                        frame.update({"error": self.error} if self.error else {"result": None})
+                        frame.update({"error": self.error} if self.error else {"result": self.rpc_handler(rpc)})
                         self.rx = bytearray(json.dumps(frame).encode())
                         if self.stale:
                             self.actual_reply = self.rx
@@ -262,10 +263,12 @@ async def test_setup_only_registers_platform_and_never_calibrates():
     from custom_components import shelly_zigbee_calibration as integration
     hass = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
-    entry = SimpleNamespace(data={"ieee": "test"})
+    entry = SimpleNamespace(data={"ieee": "test"}, entry_id="plugin", async_on_unload=MagicMock())
     with patch.object(integration, "resolve_device", return_value=FakeDevice()), patch.object(
         integration, "get_registered_device", return_value=SimpleNamespace(id="shelly")
     ), patch.object(integration, "migrate_button_device"), patch.object(
+        integration, "DimmingRuntime", return_value=SimpleNamespace(load=AsyncMock())
+    ), patch.object(
         ShellyRpc, "calibrate", new_callable=AsyncMock
     ) as calibrate:
         assert await integration.async_setup_entry(hass, entry)
@@ -378,7 +381,7 @@ async def test_platform_adds_button_to_existing_device_only():
     existing = SimpleNamespace(id="existing-zha-device")
     add_entities = MagicMock()
     with patch.object(button, "get_registered_device", return_value=existing):
-        await button.async_setup_entry(MagicMock(), SimpleNamespace(data={"ieee": "test"}), add_entities)
+        await button.async_setup_entry(MagicMock(), SimpleNamespace(data={"ieee": "test"}, runtime_data=None), add_entities)
     entities = add_entities.call_args.args[0]
     assert len(entities) == 1
     assert entities[0].device_entry is existing

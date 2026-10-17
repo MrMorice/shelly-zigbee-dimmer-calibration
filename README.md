@@ -1,16 +1,18 @@
-# Shelly Zigbee Calibration · 0.1.3
+# Shelly Zigbee Calibration · 0.2.0
 
 <img src="https://raw.githubusercontent.com/MrMorice/shelly-zigbee-dimmer-calibration/main/custom_components/shelly_zigbee_calibration/brand/icon%402x.png" alt="Frontaler 3D-Dimmer mit hellem Hintergrund und Kalibrierungsskala" width="128">
 
 Kleine benutzerdefinierte Home-Assistant-Integration für **Shelly Dimmer Gen4**:
-Sie ergänzt am vorhandenen ZHA-Gerät den Button **„Kalibrierung starten“**.
+Sie ergänzt am vorhandenen ZHA-Gerät den Button **„Kalibrierung starten“**
+und einen Assistenten für **native Mindesthelligkeit und Gamma**.
 Die Anfrage läuft ausschließlich über Zigbee. WLAN, Shelly-Cloud, MQTT und
 ZHA Toolkit werden nicht benötigt. Der vorhandene Funkstick bleibt bei ZHA.
 
 **Stand:** Für Home Assistant **Core 2026.10.2** entwickelt. Getestet mit den
 echten Core-/ZHA-/zigpy-Paketen und einem simulierten Zigbee-Gerät.
-**Noch nicht mit einem physischen Shelly getestet.** Die erste Kalibrierung
-ist deshalb ein Praxistest, keine zugesicherte Gerätekompatibilität.
+**Der neue Dimmkurven-Assistent ist noch nicht mit einem physischen Shelly getestet.**
+Er benötigt funktionierende Zigbee-RPC-Leseantworten der Shelly-Firmware.
+Der automatische Kalibrierungsbutton kommt weiterhin ohne diese Antworten aus.
 Home Assistant OS 18.3 ist eine andere Versionsnummer; ein OS-Upgrade allein
 ändert nicht die hier verwendete Core-Schnittstelle.
 
@@ -29,6 +31,70 @@ Die vorhandene Licht-Entität und das ZHA-Gerät werden nicht verändert.
 
 Die Integrationsverwaltung zeigt weiterhin den installierten Eintrag
 **Shelly Zigbee Calibration**; der Bedienknopf gehört zum ZHA-Gerät.
+
+## Mindesthelligkeit und Gamma direkt im Shelly
+
+Neu ab **0.2.0**: Unter **Einstellungen → Geräte & Dienste → Shelly Zigbee
+Calibration → Konfigurieren** öffnet sich der Assistent. Es entstehen weder
+ein zusätzliches Gerät noch eine zweite Licht-Entität. Die Einstellungen
+werden über den Shelly-RPC-Cluster ausschließlich per **Zigbee** übertragen.
+Die bestehende ZHA-Lichtsteuerung wird für die Helligkeitsvorschau verwendet.
+
+1. Nach dem Update in HACS Home Assistant neu starten. Ist kein Update sichtbar,
+   über das HACS-Menü erneut herunterladen und `main` auswählen.
+2. **Konfigurieren → Mindesthelligkeit finden** wählen. Der Assistent liest
+   zuerst `Light.GetConfig` und sichert die bisherigen Werte. Die native
+   Untergrenze beginnt im Versuch bei 0 %, die Lampe wird bei 1 % angefordert.
+3. Auf **Etwas heller (+0,5 %)** tippen, bis die Lampe zuverlässig leuchtet.
+   Mit **Etwas dunkler** kann der Wert wieder reduziert werden.
+   **Diesen Mindestwert speichern** behält die ermittelte Untergrenze.
+4. Erneut **Konfigurieren → Gamma-Kurve ausprobieren** öffnen. Die Lampe fährt
+   wiederholt von dunkel nach hell und zurück. Ein Zyklus dauert ungefähr
+   25 Sekunden zuzüglich Zigbee-Übertragungszeit.
+5. Mit **Mehr Gamma (+0,1)** und **Weniger Gamma (−0,1)** den Verlauf vergleichen.
+   **Diese Kurve speichern** behält die gewählten Einstellungen.
+
+Es werden die nativen Einstellungen `range_map` und `gamma` verändert,
+keine Kurve in Home Assistant nachgebildet. Die bisherige Obergrenze bleibt
+erhalten; Gamma ist auf Shellys dokumentierten Bereich 0,4–4,0 begrenzt.
+`min_brightness_on_toggle` wird nicht verwendet: Dieser Wert ist keine
+allgemeine Untergrenze des Dimmverlaufs.
+
+**Während der Vorschau werden die Werte bereits im Shelly geschrieben.**
+Speichern behält sie; Abbrechen oder Schließen schreibt die zuvor gelesenen
+Werte zurück. Beide Wege stellen anschließend den zuvor von Home Assistant
+gemeldeten Ein-/Aus-Zustand und bei eingeschalteter Lampe die vorherige
+Helligkeit wieder her. Nach fünf Minuten wird automatisch abgebrochen.
+Die Vorschau läuft über Home Assistant, die behaltenen Einstellungen liegen
+anschließend im Shelly. Sie sollen dadurch auch für die Bedienung am Gerät
+gelten; die tatsächliche Wirkung der Firmware auf Zigbee- und Tastersteuerung
+muss am physischen Gerät geprüft werden.
+
+**Firmware-Voraussetzung:** Für diesen Assistenten reicht eine bestätigte
+Zigbee-Schreibübertragung nicht aus. Vor Änderungen müssen `gamma` und
+`range_map` aus `Light.GetConfig` lesbar sein. Jede Änderung benötigt eine
+passende RPC-Antwort und wird anschließend erneut zurückgelesen. Liefert die
+Firmware keine RPC-Daten oder unterstützt sie die Parameter nicht, bricht
+der erste Start ab, ohne Einstellungen oder Helligkeit zu ändern. Der
+Kalibrierungsbutton bleibt trotzdem verwendbar. Die bisher beobachteten
+RPC-Leseprobleme können den Assistenten also auch bei deinem Shelly verhindern.
+
+**Bei einem unterbrochenen Versuch:** Die ursprünglichen Werte werden vor der
+ersten Änderung in Home Assistant gesichert. Ist der Shelly beim Abbrechen
+offline oder fällt Home Assistant aus, kann die Vorschau-Einstellung im
+Shelly bleiben. Den Shelly wieder erreichbar machen und **Konfigurieren →
+Mindesthelligkeit finden** oder **Gamma-Kurve ausprobieren** erneut öffnen:
+Der Assistent stellt zunächst den gesicherten Zustand wieder her. Bei einem
+Core-Neustart allein werden keine Lampen oder Shelly-Einstellungen geändert.
+Die Sicherung wird erst nach bestätigter Wiederherstellung bzw. erfolgreichem
+Speichern gelöscht. Solange eine Wiederherstellung aussteht, bleibt der
+Kalibrierungsbutton gesperrt. Die Integration bis zur Wiederherstellung nicht
+entfernen und die zugehörigen `.storage`-Daten nicht löschen.
+
+Während eines Versuchs keine anderen RPC-Clients, Automationen oder Taster
+verwenden, die dieselbe Lampe oder deren Konfiguration verändern. Die
+Integration verhindert Überschneidungen ihres Assistenten und ihres
+Kalibrierungsbuttons; externe Zugriffe kann sie nicht sperren.
 
 ## Integrationsbild
 
@@ -84,6 +150,10 @@ Die Dateien müssen so liegen, ohne einen zusätzlichen ZIP-Ordner dazwischen:
       manifest.json
       button.py
       config_flow.py
+      options_flow.py
+      curve.py
+      runtime.py
+      wizard.py
       const.py
       helpers.py
       rpc.py
@@ -147,8 +217,9 @@ ZHA-Controller garantiert.
 
 ## Entfernen
 
-Unter **Einstellungen → Geräte & Dienste** den Eintrag **Shelly Zigbee Calibration**
-löschen. Anschließend kann der zugehörige Ordner aus `custom_components`
+Zuerst laufende Versuche abbrechen und eine ausstehende Wiederherstellung
+abschließen. Unter **Einstellungen → Geräte & Dienste** den Eintrag
+**Shelly Zigbee Calibration** löschen. Gespeicherte native Dimmwerte bleiben im Shelly. Anschließend kann der zugehörige Ordner aus `custom_components`
 entfernt und Home Assistant neu gestartet werden. Das ZHA-Gerät bleibt gekoppelt.
 
 ## Technische Grundlage
@@ -156,7 +227,10 @@ entfernt und Home Assistant neu gestartet werden. Das ZHA-Gerät bleibt gekoppel
 - Shelly RPC über Zigbee: Profil vom vorhandenen Geräteendpunkt, Endpunkt 239,
   Cluster `0xFC01`, Herstellerkennung `0x1490`.
 - Zuerst RPC-Bytelänge in `TxCtl`, dann JSON in 40-Byte-Stücken in `Data`.
-- Methode ausschließlich `Light.Calibrate`, Parameter `{"id": 0}`.
+- Kalibrierungsbutton: `Light.Calibrate`, Parameter `{"id": 0}`.
+- Assistent: `Light.GetConfig` und partielle `Light.SetConfig`-Aufrufe für
+  `gamma` und `range_map`, mit bestätigter RPC-Antwort und Rücklesen.
+  Nur die Vorschau-Helligkeit läuft über die vorhandene ZHA-Licht-Entität.
 - Die normale Button-Aktion prüft die ZCL-Schreibantworten und liest die
   RPC-Mailbox nicht aus. Die Zigbee2MQTT-Referenzimplementierung dokumentiert
   fehlende RPC-Data-Leseantworten bei Shelly-Firmware, auch 2.0.0. Deshalb
@@ -177,8 +251,9 @@ entfernt und Home Assistant neu gestartet werden. Das ZHA-Gerät bleibt gekoppel
 Quellen:
 
 - [Shelly Dimmer Gen4](https://shelly-api-docs.shelly.cloud/gen2/Devices/Gen4/ShellyDimmerG4/)
-- [Shelly RPC Cluster](https://shelly-api-docs.shelly.cloud/gen2/Integrations/Zigbee/CustomClusters/RPCCluster/)
+- [Shelly RPC Cluster](https://shelly-api-docs.shelly.cloud/gen2/Integrations/Zigbee/RPCCluster/)
 - [Zigbee2MQTT-Shelly-Implementierung](https://github.com/Koenkk/zigbee-herdsman-converters/blob/master/src/devices/shelly.ts)
+- [Native Light-Konfiguration](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Light/#configuration)
 - [Light.Calibrate](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Light/#lightcalibrate)
 - [Kalibrierung und Anzeigen am Gerät](https://kb.shelly.cloud/knowledge-base/shelly-dimmer-gen4)
 

@@ -18,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     ieee = entry.data["ieee"]
-    async_add_entities([CalibrationButton(ieee, get_registered_device(hass, ieee))])
+    async_add_entities([CalibrationButton(ieee, get_registered_device(hass, ieee), runtime=entry.runtime_data)])
 
 
 class CalibrationButton(ButtonEntity):
@@ -28,7 +28,8 @@ class CalibrationButton(ButtonEntity):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_should_poll = False
 
-    def __init__(self, ieee, registered_device=None):
+    def __init__(self, ieee, registered_device=None, *, runtime=None):
+        self.runtime = runtime
         self.ieee = ieee
         self._attr_unique_id = f"{ieee}_zigbee_calibration"
         # Core 2026.10 scopes identifiers by config entry. Reusing ZHA's
@@ -46,6 +47,8 @@ class CalibrationButton(ButtonEntity):
         return {"letzter_versuch": self._attempt, "ergebnis": self._result}
 
     async def async_press(self):
+        if self.runtime is not None and (self.runtime.wizard.active or self.runtime.wizard.lock.locked() or self.runtime.pending is not None):
+            raise HomeAssistantError("Zuerst den Dimmkurven-Assistenten beenden")
         if self._lock.locked():
             raise HomeAssistantError("Eine Kalibrierungsanfrage läuft bereits")
         if time.monotonic() < self._next_allowed:
@@ -56,6 +59,8 @@ class CalibrationButton(ButtonEntity):
             except (KeyError, ValueError) as exc:
                 raise HomeAssistantError(str(exc)) from exc
             self._next_allowed = time.monotonic() + COOLDOWN_SECONDS
+            if self.runtime is not None:
+                self.runtime.hardware_until = self._next_allowed
             self._attempt = dt_util.utcnow().isoformat()
             self._result = "Start wird angefragt"
             self.async_write_ha_state()
@@ -77,4 +82,6 @@ class CalibrationButton(ButtonEntity):
             finally:
                 # Cooldown starts after the transaction, including uncertain outcomes.
                 self._next_allowed = time.monotonic() + COOLDOWN_SECONDS
+                if self.runtime is not None:
+                    self.runtime.hardware_until = self._next_allowed
                 self.async_write_ha_state()

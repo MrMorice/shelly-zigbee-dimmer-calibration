@@ -2,6 +2,8 @@
 import probatio
 from homeassistant import config_entries
 from homeassistant.helpers import selector
+from homeassistant.core import callback
+from .options_flow import DimmingOptionsFlow
 
 from .const import DOMAIN
 from .helpers import get_candidates
@@ -9,6 +11,11 @@ from .helpers import get_candidates
 
 class CalibrationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return DimmingOptionsFlow()
 
     async def async_step_user(self, user_input=None):
         try:

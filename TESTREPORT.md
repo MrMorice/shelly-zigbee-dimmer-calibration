@@ -2,7 +2,7 @@
 
 - Home Assistant Core: **2026.10.2**, Python 3.14.4
 - ZHA: **2.3.1**, zha-quirks: **2.3.0**, zigpy: **2.3.0**
-- **38 Tests bestanden**, keine fehlgeschlagenen Tests.
+- **73 Tests bestanden**, keine fehlgeschlagenen Tests.
 - Fünf Deprecation-Warnungen stammen aus Home Assistant und backoff.
 
 Geprüft wurden Zigbee-Nachrichten mit echten zigpy-ZCL-Serialisierern,
@@ -38,3 +38,37 @@ Migration mit den echten Geräte- und Entitätsregistries von Core 2026.10.2
 den Erhalt der Entity-ID, den unveränderten Lichtausgang, die wiederholbare
 Migration und die gezielte Entfernung ausschließlich leerer eigener Duplikate.
 Brand-Bilder wurden separat auf PNG-Format, Größe und deckenden Hintergrund geprüft.
+
+
+Version 0.2.0 ergänzt den nativen Dimmkurven-Assistenten. Geprüft sind:
+
+- Erkennung unterstützter `gamma`-/`range_map`-Antworten und Ablehnung ungültiger
+  oder unvollständiger Gerätekonfigurationen.
+- Partielle native Änderungen, unveränderte Obergrenze und unveränderte fremde
+  Einstellungen; keine zusätzliche Licht-Entität und keine Software-Gammakurve.
+- Mindestwertsuche, Gamma-Vorschau aufwärts/abwärts, Grenzen, explizites Speichern,
+  Abbrechen, Dialogschließen und automatischer Abbruch nach fünf Minuten.
+- Native Rücksetzung vor Wiederherstellung der Lampenhelligkeit, persistente
+  Sicherung vor dem ersten Schreibzugriff und Erhalt bei fehlgeschlagener
+  Wiederherstellung oder fehlgeschlagenem Speichern der lokalen Daten.
+- Sperren bei parallelen Sitzungen, veralteten Dialogen und automatischer
+  Hardwarekalibrierung.
+- Tatsächliche Home-Assistant-OptionsFlow-Methoden und Auflösung der bestehenden
+  ZHA-Licht-Entität mit echten Geräte-/Entitätsregistries.
+- `Light.GetConfig` und `Light.SetConfig` über den realen ZCL-Serializer,
+  mehrteilige RPC-Antworten, Zuordnung zur richtigen RPC-ID/Zielkennung,
+  fremde Mailbox-Antworten, RPC-Fehler und keine automatische Wiederholung
+  nach verlorenem Schreib-Ergebnis.
+- Ablauf Start → Mindestwert ändern → Speichern → neuer Versuch → Abbrechen
+  durch Runtime, Assistent und RPC-Transport mit simulierter Shelly-Mailbox.
+- Firmware ohne RPC-Leseantwort: Nur `Light.GetConfig` wird angefragt;
+  kein `Light.SetConfig`, kein Helligkeitsbefehl, keine Vorschau beginnt.
+
+Nicht am physischen Gerät geprüft: Verfügbarkeit der RPC-Leseantworten dieser
+Shelly-Firmware, Unterstützung der nativen Parameter auf diesem Modell,
+Wirkung der nativen Kurve auf Zigbee und Wandtaster, tatsächliche Helligkeits-
+und Warmtonwahrnehmung sowie Beständigkeit der Werte nach Geräte-Neustart.
+Die native Vorschau schreibt Einstellungen bereits während des Versuchs.
+Offline-/Stromausfall-Rücksetzung kann erst nach Wiederherstellung der Verbindung
+und erneutem Öffnen des Assistenten abgeschlossen werden. Die Tests bestätigen
+keine erfolgreich über Funk ausgeführte Gerätekonfiguration.
