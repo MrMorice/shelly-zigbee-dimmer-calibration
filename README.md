@@ -1,4 +1,6 @@
-# Shelly Zigbee Calibration · 0.1.2
+# Shelly Zigbee Calibration · 0.1.3
+
+<img src="https://raw.githubusercontent.com/MrMorice/shelly-zigbee-dimmer-calibration/main/custom_components/shelly_zigbee_calibration/brand/icon%402x.png" alt="Frontaler 3D-Dimmer mit hellem Hintergrund und Kalibrierungsskala" width="128">
 
 Kleine benutzerdefinierte Home-Assistant-Integration für **Shelly Dimmer Gen4**:
 Sie ergänzt am vorhandenen ZHA-Gerät den Button **„Kalibrierung starten“**.
@@ -11,6 +13,33 @@ echten Core-/ZHA-/zigpy-Paketen und einem simulierten Zigbee-Gerät.
 ist deshalb ein Praxistest, keine zugesicherte Gerätekompatibilität.
 Home Assistant OS 18.3 ist eine andere Versionsnummer; ein OS-Upgrade allein
 ändert nicht die hier verwendete Core-Schnittstelle.
+
+## Button direkt am vorhandenen Shelly
+
+Ab Version **0.1.3** wird der Button direkt dem vorhandenen **ZHA-Shelly**
+zugeordnet. Er erscheint dort im Bereich **Konfiguration**. Die Integration
+registriert dafür kein zusätzliches Gerät.
+
+Beim Update wird ein bereits vorhandener Kalibrierungsbutton automatisch auf
+das ZHA-Gerät verschoben. Seine eindeutige Kennung und Entity-ID bleiben erhalten,
+damit bestehende Dashboard-Verweise und Automationen weiter funktionieren.
+Ein leerer Geräte-Doppeleintrag dieser Integration wird entfernt. Hat dieser
+Eintrag weitere Entitäten oder untergeordnete Geräte, bleibt er erhalten.
+Die vorhandene Licht-Entität und das ZHA-Gerät werden nicht verändert.
+
+Die Integrationsverwaltung zeigt weiterhin den installierten Eintrag
+**Shelly Zigbee Calibration**; der Bedienknopf gehört zum ZHA-Gerät.
+
+## Integrationsbild
+
+Der frontal ausgerichtete 3D-Dimmer mit hellem Studiountergrund wird als lokales Home-Assistant-Brand-Asset in
+`brand/icon.png` (256 × 256) und `brand/icon@2x.png` (512 × 512) mit deckendem Hintergrund
+ausgeliefert. Im Home-Assistant-Integrationsdialog wird es nach Update und
+Neustart verwendet. Diese README zeigt es auch in der HACS-Detailbeschreibung.
+
+**HACS 2.0.5:** Die Übersicht kann trotz korrekter lokaler Bilder ein leeres
+Symbol zeigen. Das ist eine bekannte HACS-Einschränkung und kein Fehler des
+Bildpfads. Siehe [HACS #5171](https://github.com/hacs/integration/issues/5171).
 
 ## Über HACS installieren
 

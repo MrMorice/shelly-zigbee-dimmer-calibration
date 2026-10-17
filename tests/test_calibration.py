@@ -264,6 +264,8 @@ async def test_setup_only_registers_platform_and_never_calibrates():
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     entry = SimpleNamespace(data={"ieee": "test"})
     with patch.object(integration, "resolve_device", return_value=FakeDevice()), patch.object(
+        integration, "get_registered_device", return_value=SimpleNamespace(id="shelly")
+    ), patch.object(integration, "migrate_button_device"), patch.object(
         ShellyRpc, "calibrate", new_callable=AsyncMock
     ) as calibrate:
         assert await integration.async_setup_entry(hass, entry)
@@ -361,3 +363,67 @@ def test_device_registry_lookup_is_scoped_to_zha_entry():
     assert str(device.ieee) in candidates
     registry.async_get_device_by_identifier.assert_called_once_with(("zha", str(device.ieee)), "zha-entry")
     registry.async_get_device.assert_not_called()
+
+
+def test_button_attaches_existing_registry_entry_without_device_info():
+    existing = SimpleNamespace(id="existing-zha-device")
+    entity = button.CalibrationButton("test-ieee", existing)
+    assert entity.device_entry is existing
+    assert entity.device_info is None
+    assert entity.unique_id == "test-ieee_zigbee_calibration"
+
+
+@pytest.mark.asyncio
+async def test_platform_adds_button_to_existing_device_only():
+    existing = SimpleNamespace(id="existing-zha-device")
+    add_entities = MagicMock()
+    with patch.object(button, "get_registered_device", return_value=existing):
+        await button.async_setup_entry(MagicMock(), SimpleNamespace(data={"ieee": "test"}), add_entities)
+    entities = add_entities.call_args.args[0]
+    assert len(entities) == 1
+    assert entities[0].device_entry is existing
+    assert entities[0].device_info is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other_entity", [False, True])
+async def test_real_registry_migration_preserves_zha_device_and_entity_id(tmp_path, other_entity):
+    from types import MappingProxyType
+    from homeassistant.config_entries import ConfigEntry, ConfigEntries
+    from homeassistant.helpers import device_registry as dr, entity_registry as er
+    from custom_components.shelly_zigbee_calibration.helpers import migrate_button_device
+    hass = HomeAssistant(str(tmp_path))
+    hass.config_entries = ConfigEntries(hass, {})
+    def make_entry(domain):
+        entry = ConfigEntry(data={"ieee": "test-ieee"}, domain=domain,
+            title=domain, version=1, minor_version=1, source="user", unique_id=domain,
+            options={}, discovery_keys=MappingProxyType({}), subentries_data=[])
+        hass.config_entries._entries[entry.entry_id] = entry
+        return entry
+    zha_entry = make_entry("zha")
+    plugin_entry = make_entry("shelly_zigbee_calibration")
+    dr.async_setup(hass)
+    await dr.async_load(hass, load_empty=True)
+    await er.async_load(hass, load_empty=True)
+    devices = dr.async_get(hass)
+    entities = er.async_get(hass)
+    existing = devices.async_get_or_create(config_entry_id=zha_entry.entry_id,
+        identifiers={("zha", "test-ieee")}, name="Shelly Dimmer", manufacturer="Shelly")
+    duplicate = devices.async_get_or_create(config_entry_id=plugin_entry.entry_id,
+        identifiers={("zha", "test-ieee")}, name="Calibration duplicate")
+    light = entities.async_get_or_create("light", "zha", "test-light",
+        config_entry=zha_entry, device_id=existing.id)
+    calibration = entities.async_get_or_create("button", "shelly_zigbee_calibration",
+        "test-ieee_zigbee_calibration", config_entry=plugin_entry, device_id=duplicate.id)
+    if other_entity:
+        entities.async_get_or_create("sensor", "shelly_zigbee_calibration", "other",
+            config_entry=plugin_entry, device_id=duplicate.id)
+    migrate_button_device(hass, plugin_entry, existing)
+    assert entities.async_get(calibration.entity_id).device_id == existing.id
+    assert entities.async_get(light.entity_id).device_id == existing.id
+    assert devices.async_get(existing.id) is not None
+    assert (devices.async_get(duplicate.id) is not None) is other_entity
+    # Repeated setup is harmless and preserves the same entity ID.
+    migrate_button_device(hass, plugin_entry, existing)
+    assert entities.async_get(calibration.entity_id).unique_id == "test-ieee_zigbee_calibration"
+    await hass.async_block_till_done()

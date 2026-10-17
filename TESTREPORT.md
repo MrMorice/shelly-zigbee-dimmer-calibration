@@ -2,7 +2,7 @@
 
 - Home Assistant Core: **2026.10.2**, Python 3.14.4
 - ZHA: **2.3.1**, zha-quirks: **2.3.0**, zigpy: **2.3.0**
-- **34 Tests bestanden**, keine fehlgeschlagenen Tests.
+- **38 Tests bestanden**, keine fehlgeschlagenen Tests.
 - Fünf Deprecation-Warnungen stammen aus Home Assistant und backoff.
 
 Geprüft wurden Zigbee-Nachrichten mit echten zigpy-ZCL-Serialisierern,
@@ -30,3 +30,11 @@ den ZHA-Konfigurationseintrag begrenzten Registry-Aufruf. Die normale Aktion
 bestätigt nur die Zigbee-Übertragung, nicht Start oder Erfolg der Kalibrierung.
 Der gemeldete Hardware-Timeout wurde ohne Funkhardware nicht reproduziert;
 die tatsächliche Kalibrierung muss nach dem Update erneut geprüft werden.
+
+Version 0.1.3 ergänzt vier Tests für die Gerätezuordnung: direkte Zuordnung
+des Buttons ohne DeviceInfo, Plattform-Setup am bestehenden Gerät sowie
+Migration mit den echten Geräte- und Entitätsregistries von Core 2026.10.2
+(mit und ohne weitere Entität am bisherigen Doppeleintrag). Die Tests prüfen
+den Erhalt der Entity-ID, den unveränderten Lichtausgang, die wiederholbare
+Migration und die gezielte Entfernung ausschließlich leerer eigener Duplikate.
+Brand-Bilder wurden separat auf PNG-Format, Größe und deckenden Hintergrund geprüft.

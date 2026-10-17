@@ -5,19 +5,20 @@ import time
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
 from zigpy.exceptions import ZigbeeException
 
 from .const import COOLDOWN_SECONDS
-from .helpers import resolve_device
+from .helpers import get_registered_device, resolve_device
 from .rpc import RpcError, ShellyRpc
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([CalibrationButton(entry.data["ieee"])])
+    ieee = entry.data["ieee"]
+    async_add_entities([CalibrationButton(ieee, get_registered_device(hass, ieee))])
 
 
 class CalibrationButton(ButtonEntity):
@@ -27,10 +28,14 @@ class CalibrationButton(ButtonEntity):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_should_poll = False
 
-    def __init__(self, ieee):
+    def __init__(self, ieee, registered_device=None):
         self.ieee = ieee
         self._attr_unique_id = f"{ieee}_zigbee_calibration"
-        self._attr_device_info = DeviceInfo(identifiers={("zha", ieee)})
+        # Core 2026.10 scopes identifiers by config entry. Reusing ZHA's
+        # identifier via DeviceInfo would create a second device under our entry.
+        # Attach the existing registry entry directly; EntityPlatform supports
+        # this when device_info is None. The button keeps its existing unique ID.
+        self.device_entry = registered_device
         self._lock = asyncio.Lock()
         self._next_allowed = 0.0
         self._result = "Noch nicht gestartet"
