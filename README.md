@@ -1,4 +1,4 @@
-# Shelly Zigbee Calibration · 0.1.1
+# Shelly Zigbee Calibration · 0.1.2
 
 Kleine benutzerdefinierte Home-Assistant-Integration für **Shelly Dimmer Gen4**:
 Sie ergänzt am vorhandenen ZHA-Gerät den Button **„Kalibrierung starten“**.
@@ -73,10 +73,11 @@ laufenden Kalibrierung die Lampe nicht bedienen.
 
 Das Attribut **ergebnis** am Button unterscheidet:
 
-- **„Start vom Shelly bestätigt; Abschluss an der Lampe prüfen“**: Das Gerät
-  hat die Kalibrierungsanfrage angenommen. Das bestätigt noch keinen
-  erfolgreichen Abschluss. Laut Shelly leuchtet die Lampe nach erfolgreicher
-  Kalibrierung zehn Sekunden und schaltet dann aus.
+- **„Befehl vollständig übertragen; Start und Abschluss an der Lampe prüfen“**:
+  Alle Zigbee-Schreibzugriffe wurden vom Gerät bestätigt. Dies bestätigt weder
+  die Annahme der RPC-Methode noch einen erfolgreichen Kalibrierungsabschluss.
+  Laut Shelly leuchtet die Lampe nach erfolgreicher Kalibrierung zehn Sekunden
+  und schaltet dann aus. Danach das tatsächliche Dimmen prüfen.
 - **Fehler oder fehlende Bestätigung**: Die Fehlermeldung steht am Button und
   im Home-Assistant-Protokoll. Bei einer fehlenden Antwort kann die
   Kalibrierung trotzdem schon laufen. Zwei Minuten abwarten und die Lampe prüfen.
@@ -99,8 +100,12 @@ laufende Kalibrierung erneut zu starten.
   das Gerät nicht erkennt. Für eine Anpassung sind die **ZHA-Gerätediagnose**,
   die Shelly-Firmwareversion und die Fehlermeldung hilfreich. Diagnose vor dem
   Teilen auf persönliche Daten prüfen.
-- Timeout: Mindestens zwei Minuten abwarten. Die Anfrage wird absichtlich nicht
-  automatisch erneut gesendet, weil sie bereits ausgeführt worden sein kann.
+- Timeout: Die Meldung nennt jetzt den Schritt (`TxCtl schreiben`, `Data schreiben`
+  oder im optionalen Diagnosepfad `RxCtl/Data lesen`). Bei einer möglicherweise
+  vollständig übertragenen Anfrage mindestens zwei Minuten abwarten. Es gibt
+  keine automatischen Wiederholungen.
+- Ein Helligkeitswert von 2 % in ZHA ist kein Kalibrierungsstatus. Nach Ablauf
+  der Kalibrierung die reale Lampe mit unterschiedlichen Helligkeiten testen.
 - Gleichzeitige Zugriffe anderer Programme auf Shellys RPC-Mailbox vermeiden.
   Die Integration serialisiert nur ihre eigenen Anfragen. Normales Schalten
   über den ZHA-Lichtausgang benutzt einen anderen Cluster.
@@ -123,8 +128,19 @@ entfernt und Home Assistant neu gestartet werden. Das ZHA-Gerät bleibt gekoppel
   Cluster `0xFC01`, Herstellerkennung `0x1490`.
 - Zuerst RPC-Bytelänge in `TxCtl`, dann JSON in 40-Byte-Stücken in `Data`.
 - Methode ausschließlich `Light.Calibrate`, Parameter `{"id": 0}`.
-- Schreibantworten und RPC-Antwort werden geprüft. `RxCtl`/`Data` werden begrenzt
-  ausgelesen; Anfragen werden anhand von RPC-ID und Zielkennung zugeordnet.
+- Die normale Button-Aktion prüft die ZCL-Schreibantworten und liest die
+  RPC-Mailbox nicht aus. Die Zigbee2MQTT-Referenzimplementierung dokumentiert
+  fehlende RPC-Data-Leseantworten bei Shelly-Firmware, auch 2.0.0. Deshalb
+  wird kein Kalibrierungserfolg aus einer fehlenden Antwort abgeleitet.
+- Ein optionaler interner Diagnosepfad (`calibrate(confirm=True)`) kann die
+  RPC-Antwort begrenzt auslesen und anhand von RPC-ID und Zielkennung zuordnen.
+  Er ist nicht Teil der normalen Button-Aktion.
+- Globale ZCL-Antworten mit und ohne Herstellerkopf werden nach Zuordnung
+  über Gerät, Profil, Cluster, Endpunkte und Sequenznummer akzeptiert.
+  Default Responses werden nur beim passenden ursprünglichen Befehl verarbeitet.
+  Eine Leseantwort ohne Daten wird nicht als erfolgreiche RPC-Antwort behandelt.
+- Der Registry-Aufruf ist auf den ZHA-Konfigurationseintrag begrenzt und nutzt
+  die aktuelle API von Core 2026.10.2.
 - Temporärer zigpy-Nachrichtenlistener statt Änderungen am Core. Dadurch können
   auch Antworten auf Shellys eigenem Profil verarbeitet werden.
 - Keine automatischen Wiederholungen auf Anwendungsebene.
@@ -133,6 +149,7 @@ Quellen:
 
 - [Shelly Dimmer Gen4](https://shelly-api-docs.shelly.cloud/gen2/Devices/Gen4/ShellyDimmerG4/)
 - [Shelly RPC Cluster](https://shelly-api-docs.shelly.cloud/gen2/Integrations/Zigbee/CustomClusters/RPCCluster/)
+- [Zigbee2MQTT-Shelly-Implementierung](https://github.com/Koenkk/zigbee-herdsman-converters/blob/master/src/devices/shelly.ts)
 - [Light.Calibrate](https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Light/#lightcalibrate)
 - [Kalibrierung und Anzeigen am Gerät](https://kb.shelly.cloud/knowledge-base/shelly-dimmer-gen4)
 

@@ -108,7 +108,7 @@ class FakeDevice(ListenableMixin):
 @pytest.mark.asyncio
 async def test_calibration_wire_roundtrip():
     device = FakeDevice()
-    await ShellyRpc(device).calibrate()
+    await ShellyRpc(device).calibrate(confirm=True)
     assert len(device.rpc_requests) == 1
     assert device.rpc_requests[0]["method"] == "Light.Calibrate"
     assert device.rpc_requests[0]["params"] == {"id": 0}
@@ -119,7 +119,7 @@ async def test_calibration_wire_roundtrip():
 async def test_stale_mailbox_response_is_not_accepted():
     device = FakeDevice()
     device.stale = True
-    await ShellyRpc(device).calibrate()
+    await ShellyRpc(device).calibrate(confirm=True)
     assert len(device.rpc_requests) == 1
 
 
@@ -128,7 +128,7 @@ async def test_rpc_device_error():
     device = FakeDevice()
     device.error = {"code": -114, "message": "Calibration in progress"}
     with pytest.raises(RpcError, match="-114"):
-        await ShellyRpc(device).calibrate()
+        await ShellyRpc(device).calibrate(confirm=True)
     assert not device._listeners
 
 
@@ -137,7 +137,7 @@ async def test_write_rejected_never_starts_calibration():
     device = FakeDevice()
     device.write_failure = True
     with pytest.raises(RpcError, match="Schreibzugriff"):
-        await ShellyRpc(device).calibrate()
+        await ShellyRpc(device).calibrate(confirm=True)
     assert not device.rpc_requests
     assert not device._listeners
 
@@ -148,8 +148,8 @@ async def test_no_automatic_retry_on_lost_response(after_start):
     device = FakeDevice()
     device.drop = not after_start
     device.drop_after_start = after_start
-    with pytest.raises(RpcError, match="könnte bereits laufen"):
-        await ShellyRpc(device, exchange_timeout=0.01).calibrate()
+    with pytest.raises(RpcError, match="Data lesen|RxCtl lesen|TxCtl schreiben"):
+        await ShellyRpc(device, exchange_timeout=0.01).calibrate(confirm=True)
     assert len(device.rpc_requests) == int(after_start)
     assert not device._listeners
 
@@ -215,7 +215,7 @@ async def test_button_ack_and_duplicate_protection():
     device = FakeDevice()
     with patch.object(button, "resolve_device", return_value=device):
         await entity.async_press()
-        assert "Start vom Shelly bestätigt" in entity.extra_state_attributes["ergebnis"]
+        assert "Befehl vollständig übertragen" in entity.extra_state_attributes["ergebnis"]
         with pytest.raises(HomeAssistantError, match="130 Sekunden"):
             await entity.async_press()
     assert len(device.rpc_requests) == 1
@@ -297,3 +297,67 @@ def test_real_dimmer_name_still_requires_shelly_rpc(change):
     else:
         del device.endpoints[239]
     assert not is_supported(device)
+
+
+@pytest.mark.asyncio
+async def test_normal_operation_does_not_read_broken_rpc_mailbox():
+    device = FakeDevice()
+    device.drop_after_start = True
+    await ShellyRpc(device).calibrate()
+    assert len(device.rpc_requests) == 1
+    for request in device.requests:
+        header, _ = f.ZCLHeader.deserialize(request["data"])
+        assert header.command_id == f.GeneralCommand.Write_Attributes
+        assert not header.frame_control.disable_default_response
+    assert not device._listeners
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("manufacturer", [None, 0x1490])
+@pytest.mark.parametrize("command,payload", [(0x04, b"\x00"), (0x0B, b"\x02\x00")])
+async def test_global_write_responses_with_optional_manufacturer(manufacturer, command, payload):
+    device = FakeDevice()
+    client = ShellyRpc(device)
+    future = asyncio.get_running_loop().create_future()
+    client._pending = (7, 0x04, future)
+    header = f.ZCLHeader.general(tsn=7, command_id=command,
+                               manufacturer=manufacturer, direction=f.Direction.Server_to_Client)
+    client.handle_message(device, 0xC001, 0xFC01, 239, 1, header.serialize() + payload)
+    assert future.result() == b"\x00"
+
+
+@pytest.mark.asyncio
+async def test_explicit_zcl_error_is_not_hidden():
+    device = FakeDevice()
+    client = ShellyRpc(device)
+    future = asyncio.get_running_loop().create_future()
+    client._pending = (7, 0x04, future)
+    header = f.ZCLHeader.general(tsn=7, command_id=0x0B, manufacturer=None,
+                               direction=f.Direction.Server_to_Client)
+    client.handle_message(device, 0xC001, 0xFC01, 239, 1, header.serialize() + b"\x02\x86")
+    with pytest.raises(RpcError, match="0x86"):
+        await future
+
+
+@pytest.mark.asyncio
+async def test_timeout_before_request_completion_reports_phase():
+    device = FakeDevice()
+    device.drop = True
+    with pytest.raises(RpcError, match="TxCtl schreiben.*noch nicht übertragen"):
+        await ShellyRpc(device, exchange_timeout=0.01).calibrate()
+    assert not device.rpc_requests
+
+
+def test_device_registry_lookup_is_scoped_to_zha_entry():
+    from custom_components.shelly_zigbee_calibration import helpers
+    device = FakeDevice()
+    registry = MagicMock()
+    registry.async_get_device_by_identifier.return_value = SimpleNamespace(
+        name_by_user="Testdimmer", name="Dimmer")
+    with patch.object(helpers, "get_controller", return_value=SimpleNamespace(devices={device.ieee: device})), patch.object(
+        helpers, "get_config_entry", return_value=SimpleNamespace(entry_id="zha-entry")
+    ), patch.object(helpers.dr, "async_get", return_value=registry):
+        candidates = helpers.get_candidates(MagicMock())
+    assert str(device.ieee) in candidates
+    registry.async_get_device_by_identifier.assert_called_once_with(("zha", str(device.ieee)), "zha-entry")
+    registry.async_get_device.assert_not_called()

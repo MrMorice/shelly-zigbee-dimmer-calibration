@@ -68,7 +68,7 @@ class CalibrationButton(ButtonEntity):
                 _LOGGER.exception("Kalibrierungsanfrage für %s fehlgeschlagen", self.ieee)
                 raise HomeAssistantError(self._result) from exc
             else:
-                self._result = "Start vom Shelly bestätigt; Abschluss an der Lampe prüfen"
+                self._result = "Befehl vollständig übertragen; Start und Abschluss an der Lampe prüfen"
             finally:
                 # Cooldown starts after the transaction, including uncertain outcomes.
                 self._next_allowed = time.monotonic() + COOLDOWN_SECONDS

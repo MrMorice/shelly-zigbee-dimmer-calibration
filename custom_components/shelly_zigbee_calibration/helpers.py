@@ -1,5 +1,5 @@
 """Resolve existing ZHA devices; never open a second radio connection."""
-from homeassistant.components.zha.helpers import get_zha_gateway
+from homeassistant.components.zha.helpers import get_config_entry, get_zha_gateway
 from homeassistant.helpers import device_registry as dr
 
 from .const import RPC_CLUSTER, RPC_ENDPOINT
@@ -28,12 +28,13 @@ def is_supported(device):
 def get_candidates(hass):
     app = get_controller(hass)
     registry = dr.async_get(hass)
+    zha_entry = get_config_entry(hass)
     result = {}
     for device in app.devices.values():
         if not is_supported(device):
             continue
         ieee = str(device.ieee)
-        registered = registry.async_get_device(identifiers={("zha", ieee)})
+        registered = registry.async_get_device_by_identifier(("zha", ieee), zha_entry.entry_id)
         name = (registered.name_by_user or registered.name) if registered else None
         result[ieee] = f"{name or 'Shelly Dimmer Gen4'} ({ieee})"
     return result

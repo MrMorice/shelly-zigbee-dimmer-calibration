@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import struct
 import uuid
 
 from .const import MANUFACTURER, RPC_CLUSTER, RPC_ENDPOINT, SOURCE_ENDPOINT
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class RpcError(Exception):
@@ -29,34 +33,65 @@ class ShellyRpc:
         self.exchange_timeout = exchange_timeout
         self.response_timeout = response_timeout
         self._pending = None
+        self.phase = "Vorbereitung"
+        self.may_have_started = False
+        self._received_headers = []
 
     def handle_message(self, sender, profile, cluster, src_ep, dst_ep, message):
         """Receive only our exact manufacturer-specific ZCL response."""
         if (self._pending is None or sender.ieee != self.device.ieee
-                or profile != self.profile or cluster != RPC_CLUSTER
-                or src_ep != RPC_ENDPOINT or dst_ep != SOURCE_ENDPOINT):
+                or cluster != RPC_CLUSTER):
+            return
+        if len(self._received_headers) < 8:
+            self._received_headers.append(
+                f"Profil={profile:#06x}, EP={src_ep}->{dst_ep}, Header={message[:5].hex()}"
+            )
+        if (profile != self.profile or src_ep != RPC_ENDPOINT
+                or dst_ep != SOURCE_ENDPOINT or len(message) < 3):
             return
         tsn, expected_command, future = self._pending
-        if future.done() or len(message) < 5:
+        if future.done():
             return
         control = message[0]
-        if (control & 0x03 or not control & 0x04 or not control & 0x08
-                or int.from_bytes(message[1:3], "little") != MANUFACTURER
-                or message[3] != tsn):
+        if control & 0x03 or not control & 0x08:
             return
-        command, payload = message[4], message[5:]
+        # Some devices omit the manufacturer header in global responses. The
+        # sender, APS profile/cluster/endpoints and TSN still identify our request.
+        offset = 1
+        if control & 0x04:
+            if len(message) < 5 or int.from_bytes(message[1:3], "little") != MANUFACTURER:
+                return
+            offset = 3
+        if message[offset] != tsn:
+            return
+        command, payload = message[offset + 1], message[offset + 2:]
         if command == expected_command:
             future.set_result(payload)
-        elif command == 0x0B:  # Default response instead of requested response.
-            future.set_exception(RpcError("Shelly meldet eine unerwartete ZCL-Antwort: "
-                                          + payload.hex()))
+        elif command == 0x0B and len(payload) == 2:
+            original = 0x02 if expected_command == 0x04 else 0x00
+            if payload[0] != original:
+                return
+            if payload[1] != 0:
+                future.set_exception(RpcError(
+                    f"Shelly-ZCL-Fehler bei {self.phase}: Status 0x{payload[1]:02x}"
+                ))
+            elif expected_command == 0x04:
+                # Explicit success for this write; this does not prove the RPC
+                # method ran. Never treat a default success as read data.
+                future.set_result(b"\x00")
+            else:
+                future.set_exception(RpcError(
+                    f"Shelly bestätigt Lesezugriff ohne Daten bei {self.phase}"
+                ))
 
     async def _exchange(self, command, payload, response_command):
         tsn = self.device.get_sequence()
         future = asyncio.get_running_loop().create_future()
         self._pending = (tsn, response_command, future)
-        # Global command; manufacturer-specific; suppress default responses.
-        frame = struct.pack("<B H B B", 0x14, MANUFACTURER, tsn, command) + payload
+        # Match normal zigpy global requests: allow explicit default errors or
+        # success responses, rather than asking the firmware to suppress them.
+        frame = struct.pack("<B H B B", 0x04, MANUFACTURER, tsn, command) + payload
+        _LOGGER.debug("RPC %s: ZCL command=0x%02x TSN=%d", self.phase, command, tsn)
         try:
             async with asyncio.timeout(self.exchange_timeout):
                 await self.device.request(
@@ -113,8 +148,12 @@ class ShellyRpc:
             raise RpcError("Ungültiger Shelly-RPC-Antworttyp")
         return frame
 
-    async def calibrate(self):
-        """Start calibration; return only after Shelly acknowledges the RPC."""
+    async def calibrate(self, *, confirm=False):
+        """Send calibration once; optionally read an RPC reply for diagnostics.
+
+        Known Shelly firmware does not return RPC Data reads. Normal operation
+        therefore validates ZCL writes only and makes no claim of RPC acceptance.
+        """
         request_id = uuid.uuid4().int & 0x7FFFFFFF
         source = "ha-cal-" + uuid.uuid4().hex[:8]
         payload = json.dumps({
@@ -125,10 +164,17 @@ class ShellyRpc:
         try:
             # TxCtl resets an incomplete outgoing frame. Serialize at integration
             # level and do not use a second RPC client on this device concurrently.
+            self.phase = "TxCtl schreiben (Anfragelänge)"
             await self._write(1, 0x23, struct.pack("<I", len(payload)))
             for offset in range(0, len(payload), 40):
                 chunk = payload[offset:offset + 40]
+                self.phase = f"Data schreiben (Bytes {offset + 1}–{offset + len(chunk)} von {len(payload)})"
+                if offset + len(chunk) == len(payload):
+                    self.may_have_started = True
                 await self._write(0, 0x42, bytes([len(chunk)]) + chunk)
+            if not confirm:
+                return
+            self.phase = "RxCtl lesen (RPC-Antwort abwarten)"
             # Calibration is asynchronous. A null result acknowledges START only.
             async with asyncio.timeout(self.response_timeout):
                 stale = 0
@@ -137,6 +183,7 @@ class ShellyRpc:
                     if not size:
                         await asyncio.sleep(0.25)
                         continue
+                    self.phase = "Data lesen (RPC-Antwort)"
                     frame = await self._read_frame(size)
                     if frame.get("id") != request_id or frame.get("dst") != source:
                         stale += 1
@@ -150,9 +197,12 @@ class ShellyRpc:
                         raise RpcError("Unerwartete Antwort auf Light.Calibrate")
                     return
         except TimeoutError as exc:
+            observed = "; ".join(self._received_headers) or "keine RPC-ZCL-Antwort empfangen"
+            outcome = ("Die Kalibrierung könnte bereits laufen. Zwei Minuten warten und Lampe prüfen."
+                       if self.may_have_started else
+                       "Die vollständige Anfrage wurde noch nicht übertragen.")
             raise RpcError(
-                "Keine vollständige Bestätigung vom Shelly. Die Kalibrierung "
-                "könnte bereits laufen. Zwei Minuten warten und Lampe prüfen."
+                f"Zeitüberschreitung bei {self.phase}. {outcome} Empfang: {observed}"
             ) from exc
         finally:
             self.app.remove_listener(self)
