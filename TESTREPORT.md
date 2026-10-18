@@ -2,7 +2,7 @@
 
 - Home Assistant Core: **2026.10.2**, Python 3.14.4
 - ZHA: **2.3.1**, zha-quirks: **2.3.0**, zigpy: **2.3.0**
-- **96 Tests bestanden**, keine fehlgeschlagenen Tests.
+- **101 Tests bestanden**, keine fehlgeschlagenen Tests.
 - Fünf Deprecation-Warnungen stammen aus Home Assistant und backoff.
 
 Geprüft wurden Zigbee-Nachrichten mit echten zigpy-ZCL-Serialisierern,
@@ -111,3 +111,15 @@ einem lokalen temporären Verzeichnis wiederhergestellt. Die gesamte Testsuite
 besteht mit den oben genannten echten Core-/ZHA-/zigpy-Versionen. Ein Test
 an dem physischen Shelly mit Firmware 2.0.1 steht weiterhin aus; 0.2.2 ist
 Diagnose-Unterstützung und kein nachgewiesener Fix des RPC-Leseproblems.
+
+
+Version 0.2.3 ergänzt fünf Tests für die kürzere `Light.GetStatus`-Probe auf
+demselben Zigbee-Transport: vollständige Antwort und ausbleibende Datenantwort
+bei unveränderter Lampe, unveränderten Konfigurations-/Wiederherstellungsdaten,
+getrennter eindeutiger Buttonkennung und korrektem Methodennamen im Bericht.
+Drei parametrisierte Tests stellen sicher, dass die Diagnose `Light.SetConfig`,
+`Light.Calibrate` und `Light.Set` vor dem ersten Funkzugriff ablehnt. Der
+GetStatus-Test prüft keine Gamma-/range_map-Unterstützung und liefert dafür
+`settings_supported: null`. Die Längenanzeige einer möglicherweise älteren
+Mailboxantwort wird ausdrücklich nicht als sicher zugeordnete Antwort bewertet.
+Ein Hardwaretest des kurzen Abrufs steht aus.

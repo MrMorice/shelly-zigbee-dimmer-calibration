@@ -191,3 +191,43 @@ async def test_matching_rpc_error_is_not_mistaken_for_absent_response():
         report = await runtime.check_rpc()
     assert report['summary'] == 'Shelly meldet RPC-Fehler'
     assert report['rpc_error_received'] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', [None, 'data_missing'])
+async def test_short_probe_reads_getstatus_on_same_transport_without_changes(failure):
+    device = DiagnosticDevice(failure)
+    device.rpc_handler = lambda rpc: {'id': 0, 'output': True, 'brightness': 50}
+    runtime = runtime_for_test()
+    button = RpcCheckButton('test', SimpleNamespace(id='existing'), runtime, method='Light.GetStatus')
+    rpc = ShellyRpc(device, exchange_timeout=0.01, response_timeout=0.03)
+    with patch.object(runtime, 'rpc', return_value=rpc), patch.object(runtime, 'output', new_callable=AsyncMock) as output, patch.object(runtime, 'recover', new_callable=AsyncMock) as recover:
+        await button.async_press()
+    assert [request['method'] for request in device.rpc_requests] == ['Light.GetStatus']
+    assert device.rpc_requests[0]['params'] == {'id': 0}
+    assert runtime.rpc_report['method'] == 'Light.GetStatus'
+    assert runtime.rpc_report['settings_supported'] is None
+    assert button.extra_state_attributes['rpc_diagnose'] == runtime.rpc_report
+    assert button.unique_id == 'test_dimming_rpc_check_status'
+    assert button.name == 'Zigbee-RPC kurz prüfen'
+    assert button.device_info is None and button.device_entry.id == 'existing'
+    if failure is None:
+        assert runtime.rpc_report['status'] == 'complete'
+        assert runtime.rpc_report['summary'] == 'RPC-Antwort vollständig'
+    else:
+        assert runtime.rpc_report['summary'] == 'RPC-Datenantwort fehlt oder ist ungültig'
+    runtime.store.async_save.assert_not_awaited()
+    runtime.hass.services.async_call.assert_not_called()
+    output.assert_not_awaited()
+    recover.assert_not_awaited()
+    assert not device._listeners
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('method', ['Light.SetConfig', 'Light.Calibrate', 'Light.Set'])
+async def test_diagnostics_refuse_any_write_or_calibration_method(method):
+    runtime = runtime_for_test()
+    with patch.object(runtime, 'rpc') as rpc:
+        with pytest.raises(WizardError, match='nur Light.GetConfig'):
+            await runtime.check_rpc(method)
+    rpc.assert_not_called()

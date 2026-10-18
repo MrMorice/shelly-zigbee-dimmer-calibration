@@ -91,8 +91,15 @@ class RpcCheckButton(DeviceControl, ButtonEntity):
     action = "rpc_check"
     _attr_icon = "mdi:connection"
 
-    def __init__(self, ieee, device, runtime):
-        super().__init__(ieee, device, runtime, "rpc_check", "Zigbee-RPC prüfen")
+    def __init__(self, ieee, device, runtime, *, method="Light.GetConfig"):
+        self.method = method
+        if method == "Light.GetStatus":
+            self.action = "rpc_check_status"
+            name = "Zigbee-RPC kurz prüfen"
+        else:
+            self.action = "rpc_check"
+            name = "Zigbee-RPC prüfen"
+        super().__init__(ieee, device, runtime, self.action, name)
 
     @property
     def available(self):
@@ -105,7 +112,7 @@ class RpcCheckButton(DeviceControl, ButtonEntity):
 
     async def async_press(self):
         try:
-            await self.runtime.check_rpc()
+            await self.runtime.check_rpc(self.method)
         except Exception as exc:
             raise HomeAssistantError(str(exc)) from exc
 
@@ -151,7 +158,10 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
 
 
 def control_buttons(ieee, device, runtime):
-    return [RpcCheckButton(ieee, device, runtime)] + [DimmingControlButton(ieee, device, runtime, action, name) for action, name in (
+    return [
+        RpcCheckButton(ieee, device, runtime),
+        RpcCheckButton(ieee, device, runtime, method="Light.GetStatus"),
+    ] + [DimmingControlButton(ieee, device, runtime, action, name) for action, name in (
         ("minimum", "Mindesthelligkeit suchen"),
         ("gamma", "Gamma-Vorschau starten"),
         ("increase", "Dimmwert erhöhen (+)"),

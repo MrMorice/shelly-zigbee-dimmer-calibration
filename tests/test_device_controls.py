@@ -36,9 +36,9 @@ async def test_all_platform_entities_use_same_existing_device():
         await sensor.async_setup_entry(MagicMock(), entry, add_sensors)
     buttons = add_buttons.call_args.args[0]
     sensors = add_sensors.call_args.args[0]
-    assert len(buttons) == 8 and len(sensors) == 1
+    assert len(buttons) == 9 and len(sensors) == 1
     assert all(item.device_entry is existing and item.device_info is None for item in buttons + sensors)
-    assert len({item.unique_id for item in buttons + sensors}) == 9
+    assert len({item.unique_id for item in buttons + sensors}) == 10
 
 
 @pytest.mark.asyncio

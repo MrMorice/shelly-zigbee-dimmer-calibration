@@ -1,4 +1,4 @@
-# Shelly Zigbee Calibration · 0.2.2
+# Shelly Zigbee Calibration · 0.2.3
 
 <img src="https://raw.githubusercontent.com/MrMorice/shelly-zigbee-dimmer-calibration/main/custom_components/shelly_zigbee_calibration/brand/icon%402x.png" alt="Frontaler 3D-Dimmer mit hellem Hintergrund und Kalibrierungsskala" width="128">
 
@@ -40,7 +40,7 @@ zusätzliches Gerät noch eine zweite Licht-Entität. Die Einstellungen werden
 über den Shelly-RPC-Cluster ausschließlich per **Zigbee** übertragen.
 Die bestehende ZHA-Lichtsteuerung wird für die Helligkeitsvorschau verwendet.
 
-1. Nach dem Update auf **0.2.2** in HACS Home Assistant neu starten. Ist kein
+1. Nach dem Update auf **0.2.3** in HACS Home Assistant neu starten. Ist kein
    Update sichtbar, über das HACS-Menü erneut herunterladen und `main` auswählen.
 2. **Einstellungen → Geräte & Dienste → Geräte → deinen vorhandenen Shelly**
    öffnen und den Bereich **Konfiguration** aufklappen.
@@ -113,9 +113,33 @@ Kalibrierungsbuttons; externe Zugriffe kann sie nicht sperren.
 
 ## Zigbee-RPC gezielt prüfen (ab 0.2.2)
 
+Ab **0.2.3** gibt es zwei lokale Prüftasten auf dem vorhandenen Shelly:
+
+- **Zigbee-RPC prüfen** fragt `Light.GetConfig` ab (Konfiguration).
+- **Zigbee-RPC kurz prüfen** fragt `Light.GetStatus` ab (normalerweise kürzere
+  Statusantwort). Der Transport ist derselbe Zigbee-RPC-Kanal, keine HTTP-
+  oder WLAN-Abfrage.
+
+Für den Vergleich nach dem Update Home Assistant neu starten, am Gerät
+**Zigbee-RPC kurz prüfen** einmal drücken, das Ende abwarten und unter
+**Einstellungen → Werkzeuge → Zustände** nach `rpc` filtern. Bei der Entität
+**Zigbee-RPC kurz prüfen** das Attribut **`rpc_diagnose`** kopieren. Im Bericht
+muss `method: Light.GetStatus` stehen. Der zuletzt ausgeführte Test überschreibt
+den vorherigen Bericht an den Prüfknöpfen und am Dimmkurven-Status; vor einem
+weiteren Test den benötigten Bericht kopieren. Es gibt keinen zusätzlichen
+Funkstick, kein Terminal und keine Cloud-Kommunikation während der Prüfung.
+Nur das Herunterladen des Integrationsupdates benötigt die Verbindung zu GitHub.
+
+Wichtig zur Auswertung: `RxCtl` kann eine noch nicht abgeholte ältere
+Mailboxantwort ankündigen. Erst eine vollständig gelesene Antwort mit passender
+RPC-ID und Zielkennung ist eindeutig der neuen Anfrage zugeordnet. Eine erneut
+angekündigte Länge von beispielsweise 610 Byte ist für sich noch kein Beweis,
+dass die Statusantwort selbst so groß ist. Die Prüfung leert die Mailbox nicht
+mit undokumentierten Schreibzugriffen und verändert keine Zuordnungsregeln.
+
 Wenn der Assistent an `Light.GetConfig` scheitert, am vorhandenen Shelly unter
-**Konfiguration → Zigbee-RPC prüfen** einmal drücken. Die Prüfung liest nur
-`Light.GetConfig`. Sie startet weder eine Kalibrierung noch eine Vorschau und
+**Konfiguration → Zigbee-RPC prüfen** einmal drücken. Die jeweilige Prüfung liest nur
+`Light.GetConfig` bzw. `Light.GetStatus`. Sie startet weder eine Kalibrierung noch eine Vorschau und
 ändert keine Dimmwerte. Lediglich die zum Senden der Leseanfrage erforderlichen
 RPC-Transportattribute `TxCtl` und `Data` werden beschrieben. Es wird kein
 `Light.SetConfig` gesendet.

@@ -103,8 +103,10 @@ class DimmingRuntime:
     def rpc(self):
         return ShellyRpc(resolve_device(self.hass, self.entry.data["ieee"]))
 
-    async def check_rpc(self):
-        """Read Light.GetConfig only; never recover or start a preview here."""
+    async def check_rpc(self, method="Light.GetConfig"):
+        """Probe one allowlisted read-only RPC; never recover or preview."""
+        if method not in {"Light.GetConfig", "Light.GetStatus"}:
+            raise WizardError("Für die Diagnose sind nur Light.GetConfig und Light.GetStatus erlaubt")
         if self.wizard.lock.locked():
             raise WizardError("Ein Zigbee-Vorgang läuft bereits")
         async with self.wizard.lock:
@@ -121,12 +123,13 @@ class DimmingRuntime:
             supported = None
             try:
                 rpc = self.rpc()
-                result = await rpc.call("Light.GetConfig", {"id": 0})
-                try:
-                    Curve.from_config(result)
-                    supported = True
-                except ValueError:
-                    supported = False
+                result = await rpc.call(method, {"id": 0})
+                if method == "Light.GetConfig":
+                    try:
+                        Curve.from_config(result)
+                        supported = True
+                    except ValueError:
+                        supported = False
             except asyncio.CancelledError:
                 error = "Prüfung unterbrochen"
                 raise
@@ -135,11 +138,11 @@ class DimmingRuntime:
             finally:
                 report = rpc.diagnostics if rpc is not None else {"status": "error"}
                 report["checked_at"] = datetime.now(UTC).isoformat()
-                report["method"] = "Light.GetConfig"
+                report["method"] = method
                 report["settings_supported"] = supported
                 report["error"] = error
                 report["summary"] = summarize(report)
-                report["note"] = "Nur Transportdiagnose; kein Beweis für die Fehlerursache. Keine Dimmwerte verändert."
+                report["note"] = "Nur Transportdiagnose; kein Beweis für die Fehlerursache. RxCtl kann auch eine ältere Mailboxantwort ankündigen; die Zuordnung gelingt erst mit vollständigen RPC-Daten. Keine Dimmwerte verändert."
                 self.rpc_report = report
                 self.rpc_checking = False
                 self.notify()
