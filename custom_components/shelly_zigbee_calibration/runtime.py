@@ -1,7 +1,6 @@
-"""Native Shelly configuration over Zigbee with persistent rollback recovery."""
+"""Write-only dimming trials with local settings and explicit rollback limits."""
 import asyncio
 import logging
-import json
 import time
 from datetime import UTC, datetime
 
@@ -10,10 +9,9 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
-from .curve import Curve
+from .curve import Curve, validate_settings
 from .helpers import get_registered_device, resolve_device
 from .rpc import ShellyRpc
-from .rpc_diagnostics import summarize
 from .wizard import DimmingWizard, WizardError
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,13 +28,17 @@ class DimmingRuntime:
         self.hardware_until = 0.0
         self.listeners = set()
         self.last_error = None
-        self.rpc_report = None
-        self.rpc_checking = False
+        self.saved_settings = {}
+        self.last_sent = None
+        self.outcome = None
+        self.mode = None
         self.wizard = DimmingWizard(self)
 
     async def load(self):
         data = await self.store.async_load() or {}
         self.pending = data.get("pending")
+        self.saved_settings = validate_settings(data.get("saved_settings", {}))
+        self.outcome = data.get("outcome")
 
     def resolve_source(self):
         device = get_registered_device(self.hass, self.entry.data["ieee"])
@@ -50,7 +52,7 @@ class DimmingRuntime:
             raise WizardError("Am Shelly muss genau eine aktive ZHA-Lichtsteuerung vorhanden sein")
         return matches[0]
 
-    async def prepare(self):
+    async def prepare(self, mode):
         if time.monotonic() < self.hardware_until:
             raise WizardError("Die automatische Kalibrierung könnte noch laufen. Bitte warten.")
         self.source = self.resolve_source()
@@ -58,17 +60,33 @@ class DimmingRuntime:
         state = self.hass.states.get(self.source)
         if state is None or state.state not in {"on", "off"}:
             raise WizardError("Die ZHA-Lichtsteuerung ist gerade nicht erreichbar")
-        self.curve = await self.read_curve()
+        self.mode = mode
+        options = getattr(self.entry, "options", {})
+        bounds = self.saved_settings.get("range_map", [0, 100])
+        maximum = options.get("maximum", bounds[1]) if mode == "minimum" else bounds[1]
+        gamma = self.saved_settings.get("gamma", options.get("initial_gamma", 1.0))
+        minimum = 0 if mode == "minimum" else bounds[0]
+        self.curve = Curve(minimum, gamma, maximum)
         self.last_error = None
+        self.outcome = None
+
+    def _restore_settings(self):
+        if self.pending is None:
+            return {}
+        if "restore_settings" in self.pending:
+            return validate_settings(self.pending["restore_settings"])
+        # Recovery of a pre-0.3 native trial: these values were actually read.
+        if "curve" in self.pending:
+            return Curve(**self.pending["curve"]).as_config()
+        raise WizardError("Unbekannte Wiederherstellungsdaten; Sicherung bleibt erhalten")
 
     async def recover(self):
         if self.pending is not None:
             if self.pending.get("source") != self.source:
                 raise WizardError("Die ursprüngliche Lichtsteuerung wurde geändert. Wiederherstellung prüfen.")
-            original = Curve(**self.pending["curve"])
-            await self.apply(original)
+            await self.rollback()
             await self.restore(self.pending["snapshot"])
-            await self.finish(original)
+            await self.finish(None)
 
     async def snapshot(self):
         state = self.hass.states.get(self.source)
@@ -103,79 +121,51 @@ class DimmingRuntime:
     def rpc(self):
         return ShellyRpc(resolve_device(self.hass, self.entry.data["ieee"]))
 
-    async def check_rpc(self, method="Light.GetConfig"):
-        """Probe one allowlisted read-only RPC; never recover or preview."""
-        if method not in {"Light.GetConfig", "Light.GetStatus"}:
-            raise WizardError("Für die Diagnose sind nur Light.GetConfig und Light.GetStatus erlaubt")
-        if self.wizard.lock.locked():
-            raise WizardError("Ein Zigbee-Vorgang läuft bereits")
-        async with self.wizard.lock:
-            if self.wizard.active or self.pending is not None:
-                raise WizardError("Zuerst den Einstellungsversuch bzw. die Wiederherstellung beenden")
-            if time.monotonic() < self.hardware_until:
-                raise WizardError("Die automatische Kalibrierung könnte noch laufen. Bitte warten.")
-            self.rpc_checking = True
-            self.rpc_report = None
-            self.last_error = None
-            self.notify()
-            rpc = None
-            error = None
-            supported = None
-            try:
-                rpc = self.rpc()
-                result = await rpc.call(method, {"id": 0})
-                if method == "Light.GetConfig":
-                    try:
-                        Curve.from_config(result)
-                        supported = True
-                    except ValueError:
-                        supported = False
-            except asyncio.CancelledError:
-                error = "Prüfung unterbrochen"
-                raise
-            except Exception as exc:
-                error = f"{type(exc).__name__} bei der RPC-Prüfung"
-            finally:
-                report = rpc.diagnostics if rpc is not None else {"status": "error"}
-                report["checked_at"] = datetime.now(UTC).isoformat()
-                report["method"] = method
-                report["settings_supported"] = supported
-                report["error"] = error
-                report["summary"] = summarize(report)
-                report["note"] = "Nur Transportdiagnose; kein Beweis für die Fehlerursache. RxCtl kann auch eine ältere Mailboxantwort ankündigen; die Zuordnung gelingt erst mit vollständigen RPC-Daten. Keine Dimmwerte verändert."
-                self.rpc_report = report
-                self.rpc_checking = False
-                self.notify()
-                # No configuration JSON, addresses, names or credentials in report.
-                log = _LOGGER.warning if error or supported is False else _LOGGER.info
-                log("Zigbee-RPC-Prüfung: %s", json.dumps(report, ensure_ascii=False))
-            return self.rpc_report
-
-    async def read_curve(self):
-        try:
-            result = await self.rpc().call("Light.GetConfig", {"id": 0})
-            return Curve.from_config(result)
-        except ValueError as exc:
-            raise WizardError(str(exc)) from exc
+    async def _send_settings(self, settings):
+        settings = validate_settings(settings)
+        if not settings:
+            return
+        await self.rpc().send("Light.SetConfig", {"id": 0, "config": settings})
+        self.last_sent = {"values": settings, "sent_at": datetime.now(UTC).isoformat(),
+            "transmission_acknowledged": True, "device_values_confirmed": False}
 
     async def apply(self, curve):
-        # Partial SetConfig preserves unrelated settings and the original maximum.
-        result = await self.rpc().call("Light.SetConfig", {"id": 0, "config": curve.as_config()})
-        if result is not None:
-            raise WizardError("Unerwartete Antwort auf Light.SetConfig")
-        actual = await self.read_curve()
-        if actual != curve:
-            raise WizardError("Shelly hat die angefragten Dimmwerte nicht bestätigt")
+        if self.mode not in {"minimum", "gamma"}:
+            raise WizardError("Kein Einstellungsmodus aktiv")
+        await self._send_settings(curve.as_config(self.mode))
+
+    async def rollback(self):
+        # On the first trial we do not know previous native values. Send nothing.
+        settings = self._restore_settings()
+        if settings:
+            await self._send_settings(settings)
 
     async def begin(self, snapshot):
-        pending = {"source": self.source, "snapshot": snapshot, "curve": self.curve.as_dict()}
-        await self.store.async_save({"pending": pending})
+        key = "range_map" if self.mode == "minimum" else "gamma"
+        previous = ({key: self.saved_settings[key]} if key in self.saved_settings else {})
+        pending = {"source": self.source, "snapshot": snapshot,
+            "mode": self.mode, "restore_settings": previous}
+        await self.store.async_save({"saved_settings": self.saved_settings,
+            "pending": pending, "outcome": self.outcome})
         self.pending = pending
 
     async def finish(self, curve):
-        await self.store.async_save({"pending": None})
-        self.curve = curve
+        settings = validate_settings(self.saved_settings)
+        if curve is not None:
+            settings.update(curve.as_config(self.mode))
+            outcome = "Werte gesendet und in HA gespeichert"
+        elif self._restore_settings():
+            outcome = "Gespeicherte Werte erneut gesendet"
+        else:
+            outcome = "Gestoppt – vorherige Gerätewerte unbekannt"
+        # Failed local persistence must keep both memory and the journal intact.
+        await self.store.async_save({"saved_settings": settings,
+            "pending": None, "outcome": outcome})
+        self.saved_settings = settings
+        if curve is not None:
+            self.curve = curve
         self.pending = None
+        self.outcome = outcome
 
     async def close(self):
         await self.wizard.cancel()

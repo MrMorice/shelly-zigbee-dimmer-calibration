@@ -1,4 +1,4 @@
-"""Constants for the calibration-only integration."""
+"""Domain and Zigbee transport constants."""
 DOMAIN = "shelly_zigbee_calibration"
 RPC_CLUSTER = 0xFC01
 RPC_ENDPOINT = 239

@@ -28,7 +28,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 class CalibrationButton(ButtonEntity):
     _attr_has_entity_name = True
-    _attr_name = "Kalibrierung starten"
+    _attr_name = "Automatische Kalibrierung starten"
     _attr_icon = "mdi:tune"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_should_poll = False

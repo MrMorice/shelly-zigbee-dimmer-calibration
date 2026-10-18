@@ -2,7 +2,7 @@
 from homeassistant.const import Platform, EVENT_HOMEASSISTANT_STOP
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .helpers import get_registered_device, migrate_button_device, resolve_device
+from .helpers import get_registered_device, migrate_button_device, resolve_device, remove_obsolete_diagnostics
 
 from .runtime import DimmingRuntime
 
@@ -29,6 +29,7 @@ async def async_setup_entry(hass, entry):
             runtime.report_error(str(exc))
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop))
     migrate_button_device(hass, entry, target)
+    remove_obsolete_diagnostics(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

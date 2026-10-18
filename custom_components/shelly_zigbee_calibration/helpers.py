@@ -81,3 +81,15 @@ def migrate_button_device(hass, entry, target):
         if dr.async_entries_for_parent_device(devices, duplicate.id):
             continue
         devices.async_remove_device(duplicate.id)
+
+
+def remove_obsolete_diagnostics(hass, entry):
+    """Remove only our retired probe entities, never ZHA devices or lights."""
+    registry = er.async_get(hass)
+    for suffix in ("rpc_check", "rpc_check_status"):
+        entity_id = registry.async_get_entity_id("button", "shelly_zigbee_calibration",
+            f"{entry.data['ieee']}_dimming_{suffix}")
+        if entity_id:
+            entity = registry.async_get(entity_id)
+            if entity.config_entry_id == entry.entry_id:
+                registry.async_remove(entity_id)

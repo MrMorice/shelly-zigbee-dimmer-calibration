@@ -8,7 +8,6 @@ import pytest
 from custom_components.shelly_zigbee_calibration.curve import Curve
 from custom_components.shelly_zigbee_calibration.wizard import DimmingWizard, WizardError
 from custom_components.shelly_zigbee_calibration.runtime import DimmingRuntime
-from custom_components.shelly_zigbee_calibration.options_flow import DimmingOptionsFlow
 
 
 class Backend:
@@ -42,29 +41,13 @@ class Backend:
             raise RuntimeError("offline")
         self.restored.append(snapshot)
 
+    async def rollback(self):
+        await self.apply(self.curve)
+
     async def finish(self, curve):
-        self.curve = curve
+        if curve is not None:
+            self.curve = curve
         self.pending = None
-
-
-@pytest.mark.parametrize("config", [
-    {"id": 0, "gamma": 1.2, "range_map": [6, 80]},
-    {"id": 0, "gamma": 1, "range_map": None},
-])
-def test_native_config_roundtrip(config):
-    curve = Curve.from_config(config)
-    expected = {**config, "range_map": config["range_map"] or [0, 100]}
-    assert curve.as_config() == {k: v for k, v in expected.items() if k != "id"}
-
-
-@pytest.mark.parametrize("config", [{}, {"id": 0, "gamma": 1},
-    {"id": 0, "gamma": float('nan'), "range_map": [0, 100]},
-    {"id": 0, "gamma": 1, "range_map": [100, 0]},
-    {"id": 0, "gamma": True, "range_map": [0, 100]},
-    {"id": 1, "gamma": 1, "range_map": [0, 100]}])
-def test_unsupported_or_invalid_native_config_is_rejected(config):
-    with pytest.raises(ValueError):
-        Curve.from_config(config)
 
 
 @pytest.mark.asyncio
@@ -136,7 +119,7 @@ async def test_restore_failure_retains_journal_and_old_curve():
     token = await wizard.start("minimum")
     await wizard.adjust_minimum(token, 10)
     backend.fail_restore = True
-    with pytest.raises(WizardError, match="Wiederherstellung"):
+    with pytest.raises(WizardError, match="Abschluss"):
         await wizard.save(token)
     assert backend.pending == backend.original
     assert backend.curve == Curve(6, 1.2)
@@ -186,39 +169,6 @@ async def test_setup_and_load_never_change_device_brightness():
 
 
 @pytest.mark.asyncio
-async def test_recovery_restores_before_new_attempt():
-    runtime = DimmingRuntime(MagicMock(), SimpleNamespace(entry_id="test"))
-    runtime.curve = Curve(5, 2)
-    runtime.source = "light.source"
-    snapshot = {"on": False, "brightness": 25}
-    runtime.pending = {"source": runtime.source, "snapshot": snapshot, "curve": runtime.curve.as_dict()}
-    runtime.hass.states.get.return_value = SimpleNamespace(state="off")
-    runtime.store = SimpleNamespace(async_save=AsyncMock())
-    with patch.object(runtime, "resolve_source", return_value=runtime.source), patch.object(runtime, "restore", new_callable=AsyncMock) as restore, patch.object(runtime, "apply", new_callable=AsyncMock) as apply, patch.object(runtime, "read_curve", new_callable=AsyncMock, return_value=Curve(5, 2)):
-
-        await runtime.prepare()
-    restore.assert_awaited_once_with(snapshot)
-    assert runtime.pending is None
-    assert runtime.curve == Curve(5, 2)
-
-
-@pytest.mark.asyncio
-async def test_dialog_close_cancels_owned_session():
-    backend = Backend()
-    wizard = DimmingWizard(backend)
-    token = await wizard.start("minimum")
-    flow = DimmingOptionsFlow()
-    flow.runtime = SimpleNamespace(wizard=wizard, report_error=MagicMock())
-    flow.token = token
-    tasks = []
-    flow.hass = MagicMock()
-    flow.hass.async_create_task.side_effect = lambda coro: tasks.append(asyncio.create_task(coro))
-    flow.async_remove()
-    await asyncio.gather(*tasks)
-    assert not wizard.active and backend.restored == [backend.original]
-
-
-@pytest.mark.asyncio
 async def test_auto_calibration_is_blocked_during_wizard():
     from custom_components.shelly_zigbee_calibration.button import CalibrationButton
     from homeassistant.exceptions import HomeAssistantError
@@ -230,49 +180,6 @@ async def test_auto_calibration_is_blocked_during_wizard():
     with pytest.raises(HomeAssistantError, match="Assistenten"):
         await entity.async_press()
     await wizard.cancel(token)
-
-
-@pytest.mark.asyncio
-async def test_real_options_dialog_minimum_save_and_no_changes_on_open():
-    backend = Backend()
-    wizard = DimmingWizard(backend)
-    flow = DimmingOptionsFlow()
-    flow.handler = "entry"
-    flow.hass = MagicMock()
-    flow.hass.config_entries.async_get_known_entry.return_value = SimpleNamespace(
-        runtime_data=SimpleNamespace(wizard=wizard), options={})
-    result = await flow.async_step_init()
-    assert result["type"] == "menu"
-    assert result["menu_options"] == ["minimum", "gamma"]
-    assert backend.outputs == []
-    result = await flow.async_step_minimum()
-    assert result["step_id"] == "minimum" and backend.outputs == [1]
-    result = await flow.async_step_brighter()
-    assert result["description_placeholders"]["minimum"] == "0.5"
-    assert backend.curve.minimum == 6
-    result = await flow.async_step_save()
-    assert result["type"] == "create_entry"
-    assert backend.curve == Curve(0.5, 1.2)
-    assert flow.token is None
-    assert backend.restored == [backend.original]
-
-
-@pytest.mark.asyncio
-async def test_real_options_dialog_cancel_preserves_previous_gamma():
-    backend = Backend()
-    wizard = DimmingWizard(backend)
-    flow = DimmingOptionsFlow()
-    flow.handler = "entry"
-    flow.hass = MagicMock()
-    flow.hass.config_entries.async_get_known_entry.return_value = SimpleNamespace(
-        runtime_data=SimpleNamespace(wizard=wizard), options={})
-    await flow.async_step_init()
-    await flow.async_step_gamma()
-    await flow.async_step_more_gamma()
-    result = await flow.async_step_cancel()
-    assert result["reason"] == "wizard_cancelled"
-    assert backend.curve == Curve(6, 1.2)
-    assert not wizard.active and backend.restored == [backend.original]
 
 
 @pytest.mark.asyncio
@@ -311,6 +218,7 @@ async def test_real_ha_registry_resolves_original_light(tmp_path):
 async def test_failed_save_does_not_change_in_memory_curve_or_clear_recovery():
     runtime = DimmingRuntime(MagicMock(), SimpleNamespace(entry_id='test'))
     runtime.curve = Curve(6, 1.2)
+    runtime.mode = "minimum"
     runtime.pending = {'snapshot': 'original'}
     runtime.store = SimpleNamespace(async_save=AsyncMock(side_effect=OSError('disk full')))
     with pytest.raises(OSError):
@@ -320,11 +228,11 @@ async def test_failed_save_does_not_change_in_memory_curve_or_clear_recovery():
 
 
 @pytest.mark.asyncio
-async def test_unreadable_rpc_aborts_before_first_config_or_brightness_write():
+async def test_prepare_failure_aborts_before_first_config_or_brightness_write():
     backend = Backend()
-    backend.prepare.side_effect = RuntimeError("RPC read timeout")
+    backend.prepare.side_effect = RuntimeError("Licht nicht erreichbar")
     wizard = DimmingWizard(backend)
-    with pytest.raises(RuntimeError, match="RPC read timeout"):
+    with pytest.raises(RuntimeError, match="Licht nicht erreichbar"):
         await wizard.start("minimum")
     assert backend.applied == [] and backend.outputs == [] and backend.pending is None
     assert not wizard.active
@@ -341,19 +249,6 @@ async def test_native_minimum_preserves_maximum_and_cancel_restores_config():
     assert backend.native == Curve(79.9, 1.2, 80)
     await wizard.cancel(token)
     assert backend.native == Curve(6, 1.2, 80)
-
-
-@pytest.mark.asyncio
-async def test_native_apply_requires_setconfig_success_and_getconfig_readback():
-    runtime = DimmingRuntime(MagicMock(), SimpleNamespace(entry_id="test"))
-    rpc = SimpleNamespace(call=AsyncMock(return_value=None))
-    with patch.object(runtime, "rpc", return_value=rpc), patch.object(runtime, "read_curve", new_callable=AsyncMock, return_value=Curve(5, 2, 90)):
-        await runtime.apply(Curve(5, 2, 90))
-    rpc.call.assert_awaited_once_with("Light.SetConfig", {
-        "id": 0, "config": {"gamma": 2, "range_map": [5, 90]}})
-    with patch.object(runtime, "rpc", return_value=rpc), patch.object(runtime, "read_curve", new_callable=AsyncMock, return_value=Curve(0, 1)):
-        with pytest.raises(WizardError, match="nicht bestätigt"):
-            await runtime.apply(Curve(5, 2, 90))
 
 
 @pytest.mark.asyncio
@@ -382,7 +277,7 @@ async def test_native_rollback_failure_preserves_recovery_journal():
     wizard = DimmingWizard(backend)
     token = await wizard.start("minimum")
     backend.apply = AsyncMock(side_effect=RuntimeError("offline"))
-    with pytest.raises(WizardError, match="Wiederherstellung"):
+    with pytest.raises(WizardError, match="Abschluss"):
         await wizard.cancel(token)
     assert backend.pending == backend.original
     assert backend.curve == Curve(6, 1.2)
@@ -390,120 +285,14 @@ async def test_native_rollback_failure_preserves_recovery_journal():
 
 
 @pytest.mark.asyncio
-async def test_persistent_journal_precedes_native_write_and_contains_old_config():
-    runtime = DimmingRuntime(MagicMock(), SimpleNamespace(entry_id="test"))
-    runtime.source = "light.shelly"
-    runtime.curve = Curve(6, 1.2, 80)
-    runtime.store = SimpleNamespace(async_save=AsyncMock())
-    original = {"on": True, "brightness": 25}
-    await runtime.begin(original)
-    runtime.store.async_save.assert_awaited_once_with({"pending": {
-        "source": "light.shelly", "snapshot": original,
-        "curve": {"minimum": 6, "gamma": 1.2, "maximum": 80}}})
-
-
-@pytest.mark.asyncio
-async def test_generic_rpc_roundtrip_actual_zcl_and_no_automatic_retry():
-    from test_calibration import FakeDevice
-    from custom_components.shelly_zigbee_calibration.rpc import ShellyRpc, RpcError
-    device = FakeDevice()
-    config = {"id": 0, "gamma": 1.2, "range_map": [6, 80]}
-    device.rpc_handler = lambda rpc: config
-    result = await ShellyRpc(device).call("Light.GetConfig", {"id": 0})
-    assert result == config
-    assert device.rpc_requests[0]["method"] == "Light.GetConfig"
-    assert not device._listeners
-    device.rpc_handler = lambda rpc: None
-    device.drop_after_start = True
-    with pytest.raises(RpcError, match="Zigbee-RPC-Antwort"):
-        await ShellyRpc(device, exchange_timeout=0.01).call("Light.SetConfig", {
-            "id": 0, "config": {"gamma": 2}})
-    assert len(device.rpc_requests) == 2
-    assert not device._listeners
-
-
-@pytest.mark.asyncio
-async def test_generic_rpc_rejects_errors_and_skips_foreign_mailbox_reply():
-    from test_calibration import FakeDevice
-    from custom_components.shelly_zigbee_calibration.rpc import ShellyRpc, RpcError
-    device = FakeDevice()
-    device.stale = True
-    device.rpc_handler = lambda rpc: {"id": 0, "gamma": 2, "range_map": [5, 100]}
-    assert (await ShellyRpc(device).call("Light.GetConfig", {"id": 0}))["gamma"] == 2
-    device.stale = False
-    device.error = {"code": -103, "message": "Unsupported setting"}
-    with pytest.raises(RpcError, match="Unsupported setting"):
-        await ShellyRpc(device).call("Light.SetConfig", {"id": 0, "config": {"gamma": 2}})
-    assert not device._listeners
-
-
-@pytest.mark.asyncio
-async def test_wizard_native_configuration_roundtrip_over_actual_zcl():
-    import copy
-    from test_calibration import FakeDevice
-    from custom_components.shelly_zigbee_calibration.rpc import ShellyRpc
-    device = FakeDevice()
-    config = {"id": 0, "gamma": 1.2, "range_map": [6, 80], "initial_state": "restore_last"}
-    original = copy.deepcopy(config)
-    def handle(rpc):
-        if rpc["method"] == "Light.GetConfig":
-            return copy.deepcopy(config)
-        assert rpc["method"] == "Light.SetConfig"
-        assert set(rpc["params"]["config"]) == {"gamma", "range_map"}
-        config.update(rpc["params"]["config"])
-        return None
-    device.rpc_handler = handle
-    hass = MagicMock()
-    hass.states.get.return_value = SimpleNamespace(state="on", attributes={"brightness": 83})
-    hass.services.async_call = AsyncMock()
-    runtime = DimmingRuntime(hass, SimpleNamespace(entry_id="test"))
-    runtime.store = SimpleNamespace(async_save=AsyncMock())
-    with patch.object(runtime, "rpc", side_effect=lambda: ShellyRpc(device)), patch.object(runtime, "resolve_source", return_value="light.shelly"):
-        token = await runtime.wizard.start("minimum")
-        assert config["range_map"] == [0, 80]
-        await runtime.wizard.adjust_minimum(token, 6.5)
-        assert config["range_map"] == [6.5, 80]
-        await runtime.wizard.save(token)
-        assert config["range_map"] == [6.5, 80]
-        token = await runtime.wizard.start("minimum")
-        await runtime.wizard.adjust_minimum(token, 10)
-        await runtime.wizard.cancel(token)
-        assert config["range_map"] == [6.5, 80]
-    assert config["initial_state"] == original["initial_state"]
-    assert config["gamma"] == original["gamma"]
-    assert runtime.pending is None
-    assert not device._listeners
-    assert hass.services.async_call.call_args.args == (
-        "light", "turn_on", {"entity_id": "light.shelly", "brightness": 83, "transition": 0})
-
-
-@pytest.mark.asyncio
-async def test_firmware_without_read_response_does_not_change_native_settings():
-    from test_calibration import FakeDevice
-    from custom_components.shelly_zigbee_calibration.rpc import ShellyRpc, RpcError
-    device = FakeDevice()
-    device.drop_after_start = True
-    runtime = DimmingRuntime(MagicMock(), SimpleNamespace(entry_id="test"))
-    runtime.hass.states.get.return_value = SimpleNamespace(state="on")
-    runtime.store = SimpleNamespace(async_save=AsyncMock())
-    with patch.object(runtime, "rpc", side_effect=lambda: ShellyRpc(device, exchange_timeout=0.01)), patch.object(runtime, "resolve_source", return_value="light.shelly"):
-        with pytest.raises(RpcError, match="Zigbee-RPC-Antwort"):
-            await runtime.wizard.start("gamma")
-    assert [rpc["method"] for rpc in device.rpc_requests] == ["Light.GetConfig"]
-    runtime.hass.services.async_call.assert_not_called()
-    runtime.store.async_save.assert_not_awaited()
-    assert not runtime.wizard.active and runtime.pending is None
-
-
-@pytest.mark.asyncio
 async def test_wizard_blocked_during_hardware_calibration_cooldown():
     import time
     runtime = DimmingRuntime(MagicMock(), SimpleNamespace(entry_id="test"))
     runtime.hardware_until = time.monotonic() + 130
-    with patch.object(runtime, "read_curve", new_callable=AsyncMock) as read:
+    with patch.object(runtime, "rpc") as read:
         with pytest.raises(WizardError, match="Kalibrierung"):
             await runtime.wizard.start("minimum")
-        read.assert_not_awaited()
+        read.assert_not_called()
     assert not runtime.wizard.active
 
 

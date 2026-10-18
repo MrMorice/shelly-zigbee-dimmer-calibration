@@ -30,6 +30,9 @@ class DimmingControlButton(DeviceControl, ButtonEntity):
     def __init__(self, ieee, device, runtime, action, name):
         super().__init__(ieee, device, runtime, action, name)
         self.action = action
+        self._attr_icon = {"minimum": "mdi:brightness-4", "gamma": "mdi:chart-line",
+            "increase": "mdi:plus", "decrease": "mdi:minus",
+            "save": "mdi:content-save", "cancel": "mdi:stop"}[action]
 
     @property
     def available(self):
@@ -87,36 +90,6 @@ class DimmingControlButton(DeviceControl, ButtonEntity):
             self.runtime.notify()
 
 
-class RpcCheckButton(DeviceControl, ButtonEntity):
-    action = "rpc_check"
-    _attr_icon = "mdi:connection"
-
-    def __init__(self, ieee, device, runtime, *, method="Light.GetConfig"):
-        self.method = method
-        if method == "Light.GetStatus":
-            self.action = "rpc_check_status"
-            name = "Zigbee-RPC kurz prüfen"
-        else:
-            self.action = "rpc_check"
-            name = "Zigbee-RPC prüfen"
-        super().__init__(ieee, device, runtime, self.action, name)
-
-    @property
-    def available(self):
-        wizard = self.runtime.wizard
-        return not wizard.active and not wizard.lock.locked() and self.runtime.pending is None
-
-    @property
-    def extra_state_attributes(self):
-        return {"rpc_diagnose": self.runtime.rpc_report}
-
-    async def async_press(self):
-        try:
-            await self.runtime.check_rpc(self.method)
-        except Exception as exc:
-            raise HomeAssistantError(str(exc)) from exc
-
-
 class DimmingStatusSensor(DeviceControl, SensorEntity):
     _attr_icon = "mdi:lightbulb-auto"
 
@@ -127,8 +100,6 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
     def native_value(self):
         runtime = self.runtime
         wizard = runtime.wizard
-        if getattr(runtime, "rpc_checking", False):
-            return "Zigbee-RPC-Prüfung läuft"
         if runtime.last_error:
             return "Fehler – Details prüfen"
         if wizard.active:
@@ -138,8 +109,8 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
             return f"Gamma-Vorschau: {curve.gamma:.1f}"
         if runtime.pending is not None:
             return "Wiederherstellung ausstehend"
-        if getattr(runtime, "rpc_report", None):
-            return runtime.rpc_report["summary"]
+        if getattr(runtime, "outcome", None):
+            return runtime.outcome
         return "Bereit"
 
     @property
@@ -147,7 +118,11 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
         wizard = self.runtime.wizard
         curve = wizard.candidate if wizard.active else None
         return {
-            "rpc_diagnose": getattr(self.runtime, "rpc_report", None),
+            "in_ha_gespeichert": getattr(self.runtime, "saved_settings", {}),
+            "zuletzt_gesendet": getattr(self.runtime, "last_sent", None),
+            "geraetewerte_bestaetigt": False,
+            "obergrenze_im_versuch": curve.maximum if curve else None,
+            "abbrechen": "Bekannte HA-Werte erneut senden; beim ersten Versuch bleiben Testwerte möglicherweise im Shelly",
             "modus": wizard.mode if wizard.active else None,
             "mindestwert": curve.minimum if curve else None,
             "gamma": curve.gamma if curve else None,
@@ -158,10 +133,7 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
 
 
 def control_buttons(ieee, device, runtime):
-    return [
-        RpcCheckButton(ieee, device, runtime),
-        RpcCheckButton(ieee, device, runtime, method="Light.GetStatus"),
-    ] + [DimmingControlButton(ieee, device, runtime, action, name) for action, name in (
+    return [DimmingControlButton(ieee, device, runtime, action, name) for action, name in (
         ("minimum", "Mindesthelligkeit suchen"),
         ("gamma", "Gamma-Vorschau starten"),
         ("increase", "Dimmwert erhöhen (+)"),

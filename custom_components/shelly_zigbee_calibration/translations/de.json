@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Shelly für Kalibrierung auswählen",
-        "description": "Ergänzt einen Kalibrierungsbutton am vorhandenen ZHA-Gerät. Die Einrichtung startet keine Kalibrierung. Bei Betätigung verändert sich die Lampenhelligkeit für bis zu zwei Minuten.",
+        "description": "Ergänzt Bedienknöpfe am vorhandenen ZHA-Shelly. Mindesthelligkeit und Gamma werden nur über Zigbee geschrieben. Die Einrichtung startet keinen Versuch. Gerätewerte können nicht zurückgelesen werden; die Wirkung prüfst du an der Lampe.",
         "data": {
           "ieee": "Shelly Dimmer Gen4"
         }
@@ -14,7 +14,7 @@
       "device_missing": "Das ausgewählte Gerät ist nicht mehr verfügbar."
     },
     "abort": {
-      "already_configured": "Für diesen Dimmer ist bereits ein Button eingerichtet.",
+      "already_configured": "Für diesen Dimmer ist die Integration bereits eingerichtet.",
       "zha_not_ready": "ZHA ist noch nicht bereit. ZHA starten und erneut versuchen.",
       "no_devices": "Kein unterstützter Shelly Dimmer Gen4 gefunden. Das Gerät muss in ZHA gekoppelt sein und den Shelly-RPC-Cluster auf Endpunkt 239 anbieten."
     }
@@ -22,38 +22,19 @@
   "options": {
     "step": {
       "init": {
-        "title": "Dimmkurve einstellen",
-        "description": "Die Werte werden direkt im Shelly über Zigbee eingestellt. Es entsteht keine zusätzliche Lichtsteuerung. Beginne mit dem Mindestwert. Vorschauänderungen wirken sofort im Gerät; Speichern behält sie. Abbrechen oder Schließen stellt die zuvor gelesenen Werte und den Lampenzustand wieder her, sofern der Shelly erreichbar ist. Nach fünf Minuten wird automatisch abgebrochen. Fehlende RPC-Leseantworten verhindern den Start. Nach einem unterbrochenen Versuch den Assistenten zur Wiederherstellung erneut öffnen.",
-        "menu_options": {
-          "minimum": "Mindesthelligkeit finden",
-          "gamma": "Gamma-Kurve ausprobieren"
-        }
-      },
-      "minimum": {
-        "title": "Ab wann siehst du Licht?",
-        "description": "Untergrenze im Shelly: **{minimum} %**. Die Lampe wird bei 1 % angefordert. Tippe auf „Etwas heller“, bis sie zuverlässig leuchtet. Jede Änderung wird direkt im Shelly ausprobiert. Speichern behält die Untergrenze. Die bestehende Obergrenze bleibt erhalten. Zum Abschluss wird der vorherige Lampenzustand wiederhergestellt.",
-        "menu_options": {
-          "brighter": "Etwas heller (+0,5 %)",
-          "darker": "Etwas dunkler (−0,5 %)",
-          "save": "Diesen Mindestwert speichern",
-          "cancel": "Abbrechen und wiederherstellen"
-        }
-      },
-      "gamma": {
-        "title": "Wie gleichmäßig ist der Verlauf?",
-        "description": "Shelly-Gamma: **{gamma}** · Untergrenze: **{minimum} %**. Die Lampe fährt wiederholt von dunkel nach hell und zurück (ungefähr 25 Sekunden je Durchlauf). Probiere mehr oder weniger Gamma und vergleiche die Gleichmäßigkeit. Jede Änderung wirkt sofort im Shelly. Speichern behält die Werte; Abbrechen stellt die zuvor gelesenen Werte wieder her. Zum Abschluss wird der vorherige Lampenzustand wiederhergestellt.",
-        "menu_options": {
-          "more_gamma": "Mehr Gamma (+0,1)",
-          "less_gamma": "Weniger Gamma (−0,1)",
-          "save": "Diese Kurve speichern",
-          "cancel": "Abbrechen und wiederherstellen"
+        "title": "Startwerte für Dimmversuche",
+        "description": "Diese Startwerte werden nur in Home Assistant hinterlegt. Die Geräteknöpfe starten den Versuch. Mindesthelligkeit startet bei 0 % mit der gewählten Obergrenze. Gamma startet beim zuletzt in HA gespeicherten Wert, sonst beim Startwert hier. Der erste Abbruch kann unbekannte Gerätewerte nicht zurücksetzen. Weitere Abbrüche senden die zuvor in HA gespeicherten Werte erneut; die Übernahme im Shelly bleibt unbestätigt.",
+        "data": {
+          "maximum": "Obergrenze bei der Mindestwertsuche (%)",
+          "initial_gamma": "Gamma-Startwert, solange noch keiner gespeichert ist"
         }
       }
     },
+    "error": {
+      "invalid_values": "Obergrenze muss größer als 0 und höchstens 100 sein; Gamma muss zwischen 0,4 und 4 liegen."
+    },
     "abort": {
-      "wizard_cancelled": "Versuch verworfen; ursprüngliche Shelly-Dimmwerte und Lampenzustand wiederhergestellt.",
-      "wizard_expired": "Der Versuch ist beendet. Öffne den Assistenten erneut.",
-      "wizard_error": "Der Versuch konnte nicht abgeschlossen werden: {error}"
+      "trial_active": "Zuerst den laufenden Versuch bzw. die Wiederherstellung beenden."
     }
   }
 }

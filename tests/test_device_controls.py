@@ -1,4 +1,4 @@
-"""Direct controls on the existing device, sharing the options-flow session."""
+"""Direct controls on the existing device, without a second device or RPC probes."""
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,9 +36,9 @@ async def test_all_platform_entities_use_same_existing_device():
         await sensor.async_setup_entry(MagicMock(), entry, add_sensors)
     buttons = add_buttons.call_args.args[0]
     sensors = add_sensors.call_args.args[0]
-    assert len(buttons) == 9 and len(sensors) == 1
+    assert len(buttons) == 7 and len(sensors) == 1
     assert all(item.device_entry is existing and item.device_info is None for item in buttons + sensors)
-    assert len({item.unique_id for item in buttons + sensors}) == 10
+    assert len({item.unique_id for item in buttons + sensors}) == 8
 
 
 @pytest.mark.asyncio

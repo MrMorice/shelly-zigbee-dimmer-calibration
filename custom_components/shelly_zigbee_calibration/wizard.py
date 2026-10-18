@@ -16,7 +16,8 @@ class DimmingWizard:
     """Backend implements snapshot, output, restore, begin and finish.
 
     Preview changes native settings temporarily. A journal exists before the first
-    write. Cancel restores native settings and brightness; save retains settings.
+    write. Cancel resends locally saved values if known, then restores brightness.
+    No RPC read is needed, and no native configuration is claimed as verified.
     """
 
     def __init__(self, backend, *, step_delay=0.6, timeout=300):
@@ -45,7 +46,7 @@ class DimmingWizard:
         async with self.lock:
             if self.active:
                 raise WizardError("Ein Einstellungsassistent ist bereits geöffnet")
-            await self.backend.prepare()
+            await self.backend.prepare(mode)
             original = await self.backend.snapshot()
             await self.backend.begin(original)
             self.original = original
@@ -62,6 +63,7 @@ class DimmingWizard:
                     await self.backend.apply(self.candidate)
                     await self.backend.output(1.0)
                 else:
+                    await self.backend.apply(self.candidate)
                     await self.backend.output(0.0)
             except Exception:
                 await self._finish_locked(False)
@@ -127,12 +129,14 @@ class DimmingWizard:
         self.active = False
         self.token = None
         try:
-            curve = self.candidate if commit else self.backend.curve
-            await self.backend.apply(curve)
+            if commit:
+                await self.backend.apply(self.candidate)
+            else:
+                await self.backend.rollback()
             await self.backend.restore(self.original)
-            await self.backend.finish(curve)
+            await self.backend.finish(self.candidate if commit else None)
         except Exception as exc:
-            self.error = f"Wiederherstellung nicht abgeschlossen: {exc}"
+            self.error = f"Abschluss nicht vollständig: {exc}"
             raise WizardError(self.error) from exc
         finally:
             self._notify()

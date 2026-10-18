@@ -98,6 +98,8 @@ class FakeDevice(ListenableMixin):
                 f.ReadAttributeRecord(attrid=attrid, status=f.Status.SUCCESS, value=value)
             ])
             cmd = f.GeneralCommand.Read_Attributes_rsp
+        if getattr(self, "drop_final_write_ack", False) and self.rpc_requests:
+            return
         header = f.ZCLHeader.general(
             tsn=hdr.tsn, command_id=cmd, manufacturer=0x1490,
             direction=f.Direction.Server_to_Client,
@@ -109,27 +111,10 @@ class FakeDevice(ListenableMixin):
 @pytest.mark.asyncio
 async def test_calibration_wire_roundtrip():
     device = FakeDevice()
-    await ShellyRpc(device).calibrate(confirm=True)
+    await ShellyRpc(device).calibrate()
     assert len(device.rpc_requests) == 1
     assert device.rpc_requests[0]["method"] == "Light.Calibrate"
     assert device.rpc_requests[0]["params"] == {"id": 0}
-    assert not device._listeners
-
-
-@pytest.mark.asyncio
-async def test_stale_mailbox_response_is_not_accepted():
-    device = FakeDevice()
-    device.stale = True
-    await ShellyRpc(device).calibrate(confirm=True)
-    assert len(device.rpc_requests) == 1
-
-
-@pytest.mark.asyncio
-async def test_rpc_device_error():
-    device = FakeDevice()
-    device.error = {"code": -114, "message": "Calibration in progress"}
-    with pytest.raises(RpcError, match="-114"):
-        await ShellyRpc(device).calibrate(confirm=True)
     assert not device._listeners
 
 
@@ -138,7 +123,7 @@ async def test_write_rejected_never_starts_calibration():
     device = FakeDevice()
     device.write_failure = True
     with pytest.raises(RpcError, match="Schreibzugriff"):
-        await ShellyRpc(device).calibrate(confirm=True)
+        await ShellyRpc(device).calibrate()
     assert not device.rpc_requests
     assert not device._listeners
 
@@ -149,8 +134,9 @@ async def test_no_automatic_retry_on_lost_response(after_start):
     device = FakeDevice()
     device.drop = not after_start
     device.drop_after_start = after_start
-    with pytest.raises(RpcError, match="Data lesen|RxCtl lesen|TxCtl schreiben"):
-        await ShellyRpc(device, exchange_timeout=0.01).calibrate(confirm=True)
+    device.drop_final_write_ack = after_start
+    with pytest.raises(RpcError, match="Data schreiben|TxCtl schreiben"):
+        await ShellyRpc(device, exchange_timeout=0.01).calibrate()
     assert len(device.rpc_requests) == int(after_start)
     assert not device._listeners
 
@@ -179,23 +165,6 @@ async def test_reply_from_wrong_device_is_ignored():
     assert not future.done()
     client.handle_message(device, 0xC001, 0xFC01, 239, 1, reply)
     assert future.result() == b"\x00"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("raw", [b"", b"\x02\x00\x00\x23\x01", b"\x02\x00\x86"])
-async def test_invalid_attribute_response(raw):
-    client = ShellyRpc(FakeDevice())
-    client._exchange = AsyncMock(return_value=raw)
-    with pytest.raises(RpcError):
-        await client._read(2, 0x23)
-
-
-@pytest.mark.asyncio
-async def test_empty_response_chunk_rejected():
-    client = ShellyRpc(FakeDevice())
-    client._read = AsyncMock(return_value=b"")
-    with pytest.raises(RpcError, match="Antwortstücke"):
-        await client._read_frame(10)
 
 
 def test_model_profile_and_cluster_guard():
@@ -266,7 +235,7 @@ async def test_setup_only_registers_platform_and_never_calibrates():
     entry = SimpleNamespace(data={"ieee": "test"}, entry_id="plugin", async_on_unload=MagicMock())
     with patch.object(integration, "resolve_device", return_value=FakeDevice()), patch.object(
         integration, "get_registered_device", return_value=SimpleNamespace(id="shelly")
-    ), patch.object(integration, "migrate_button_device"), patch.object(
+    ), patch.object(integration, "migrate_button_device"), patch.object(integration, "remove_obsolete_diagnostics"), patch.object(
         integration, "DimmingRuntime", return_value=SimpleNamespace(load=AsyncMock())
     ), patch.object(
         ShellyRpc, "calibrate", new_callable=AsyncMock
