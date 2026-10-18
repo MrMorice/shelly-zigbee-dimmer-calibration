@@ -1,7 +1,9 @@
 """Native Shelly configuration over Zigbee with persistent rollback recovery."""
 import asyncio
 import logging
+import json
 import time
+from datetime import UTC, datetime
 
 from homeassistant.components.zha.helpers import get_config_entry
 from homeassistant.helpers import entity_registry as er
@@ -11,6 +13,7 @@ from .const import DOMAIN
 from .curve import Curve
 from .helpers import get_registered_device, resolve_device
 from .rpc import ShellyRpc
+from .rpc_diagnostics import summarize
 from .wizard import DimmingWizard, WizardError
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +30,8 @@ class DimmingRuntime:
         self.hardware_until = 0.0
         self.listeners = set()
         self.last_error = None
+        self.rpc_report = None
+        self.rpc_checking = False
         self.wizard = DimmingWizard(self)
 
     async def load(self):
@@ -97,6 +102,51 @@ class DimmingRuntime:
 
     def rpc(self):
         return ShellyRpc(resolve_device(self.hass, self.entry.data["ieee"]))
+
+    async def check_rpc(self):
+        """Read Light.GetConfig only; never recover or start a preview here."""
+        if self.wizard.lock.locked():
+            raise WizardError("Ein Zigbee-Vorgang läuft bereits")
+        async with self.wizard.lock:
+            if self.wizard.active or self.pending is not None:
+                raise WizardError("Zuerst den Einstellungsversuch bzw. die Wiederherstellung beenden")
+            if time.monotonic() < self.hardware_until:
+                raise WizardError("Die automatische Kalibrierung könnte noch laufen. Bitte warten.")
+            self.rpc_checking = True
+            self.rpc_report = None
+            self.last_error = None
+            self.notify()
+            rpc = None
+            error = None
+            supported = None
+            try:
+                rpc = self.rpc()
+                result = await rpc.call("Light.GetConfig", {"id": 0})
+                try:
+                    Curve.from_config(result)
+                    supported = True
+                except ValueError:
+                    supported = False
+            except asyncio.CancelledError:
+                error = "Prüfung unterbrochen"
+                raise
+            except Exception as exc:
+                error = f"{type(exc).__name__} bei der RPC-Prüfung"
+            finally:
+                report = rpc.diagnostics if rpc is not None else {"status": "error"}
+                report["checked_at"] = datetime.now(UTC).isoformat()
+                report["method"] = "Light.GetConfig"
+                report["settings_supported"] = supported
+                report["error"] = error
+                report["summary"] = summarize(report)
+                report["note"] = "Nur Transportdiagnose; kein Beweis für die Fehlerursache. Keine Dimmwerte verändert."
+                self.rpc_report = report
+                self.rpc_checking = False
+                self.notify()
+                # No configuration JSON, addresses, names or credentials in report.
+                log = _LOGGER.warning if error or supported is False else _LOGGER.info
+                log("Zigbee-RPC-Prüfung: %s", json.dumps(report, ensure_ascii=False))
+            return self.rpc_report
 
     async def read_curve(self):
         try:

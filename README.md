@@ -1,4 +1,4 @@
-# Shelly Zigbee Calibration · 0.2.1
+# Shelly Zigbee Calibration · 0.2.2
 
 <img src="https://raw.githubusercontent.com/MrMorice/shelly-zigbee-dimmer-calibration/main/custom_components/shelly_zigbee_calibration/brand/icon%402x.png" alt="Frontaler 3D-Dimmer mit hellem Hintergrund und Kalibrierungsskala" width="128">
 
@@ -40,7 +40,7 @@ zusätzliches Gerät noch eine zweite Licht-Entität. Die Einstellungen werden
 über den Shelly-RPC-Cluster ausschließlich per **Zigbee** übertragen.
 Die bestehende ZHA-Lichtsteuerung wird für die Helligkeitsvorschau verwendet.
 
-1. Nach dem Update auf **0.2.1** in HACS Home Assistant neu starten. Ist kein
+1. Nach dem Update auf **0.2.2** in HACS Home Assistant neu starten. Ist kein
    Update sichtbar, über das HACS-Menü erneut herunterladen und `main` auswählen.
 2. **Einstellungen → Geräte & Dienste → Geräte → deinen vorhandenen Shelly**
    öffnen und den Bereich **Konfiguration** aufklappen.
@@ -111,6 +111,54 @@ verwenden, die dieselbe Lampe oder deren Konfiguration verändern. Die
 Integration verhindert Überschneidungen ihres Assistenten und ihres
 Kalibrierungsbuttons; externe Zugriffe kann sie nicht sperren.
 
+## Zigbee-RPC gezielt prüfen (ab 0.2.2)
+
+Wenn der Assistent an `Light.GetConfig` scheitert, am vorhandenen Shelly unter
+**Konfiguration → Zigbee-RPC prüfen** einmal drücken. Die Prüfung liest nur
+`Light.GetConfig`. Sie startet weder eine Kalibrierung noch eine Vorschau und
+ändert keine Dimmwerte. Lediglich die zum Senden der Leseanfrage erforderlichen
+RPC-Transportattribute `TxCtl` und `Data` werden beschrieben. Es wird kein
+`Light.SetConfig` gesendet.
+
+Während der Prüfung zeigt **Dimmkurven-Status** „Zigbee-RPC-Prüfung läuft“.
+Nach Abschluss den Namen der Entität **Zigbee-RPC prüfen** oder
+**Dimmkurven-Status** anklicken und unter den Attributen den gesamten Eintrag
+**`rpc_diagnose`** kopieren. Alternativ unter **Einstellungen → Geräte &
+Dienste → Shelly Zigbee Calibration** im Menü des Integrationseintrags die
+Diagnose herunterladen. Der Fehlerbericht steht außerdem als eine Zeile
+**„Zigbee-RPC-Prüfung“** im Home-Assistant-Protokoll; Debug-Protokollierung
+muss dafür nicht eingeschaltet werden. Erfolgreiche Prüfungen werden auf
+INFO-Niveau protokolliert und bleiben ebenfalls im Status abrufbar.
+
+Die Prüfung unterscheidet:
+
+- keine gültige `RxCtl`-Antwort;
+- gültige `RxCtl`-Antworten, die noch keine Daten ankündigen;
+- angekündigte Antwortdaten, aber fehlende/ungültige `Data`-Antwort;
+- unvollständige oder ungültige Antwortdaten;
+- vollständige JSON-RPC-Antwort mit unpassender ID bzw. fehlender/unpassender
+  Zielkennung (`dst`);
+- vollständige, zugeordnete Antwort, gegebenenfalls mit Shelly-RPC-Fehler oder
+  ohne die benötigten Dimmparameter.
+
+`rpc_diagnose` enthält die letzte Phase, Laufzeit, Anzahl bestätigter
+Transport-Schreibzugriffe, `RxCtl`-Leseversuche und letzte Antwortlänge,
+Anzahl/Länge der empfangenen Datenstücke sowie Zähler für verworfene Antworten.
+Bis zu zwölf ZCL-Headerproben enthalten Profil, Endpunkte, Header und Paketlänge;
+JSON-Nutzdaten und Konfigurationswerte werden nicht exportiert. Der Bericht
+enthält keine Geräteadressen, Gerätenamen oder Zugangsdaten aus der
+Gerätekonfiguration. Die Home-Assistant-Diagnosedatei kann zusätzlich allgemeine
+Systeminformationen enthalten; vor dem Teilen prüfen.
+
+Die Zuordnungsregeln werden nicht gelockert. Die Prüfung wiederholt die
+RPC-Anfrage nicht automatisch. Sie ist während eines laufenden Assistenten,
+einer ausstehenden Wiederherstellung oder der Kalibrierungssperrzeit blockiert.
+Der Bericht bleibt bis zur nächsten Prüfung oder einem Core-Neustart/Neuladen
+im Speicher verfügbar. Er dokumentiert, was bei Home Assistant ankommt; er
+ersetzt keinen unabhängigen Funkmitschnitt und beweist allein keinen
+Firmwarefehler. Ein neues HACS-Update mit dieser Diagnosefunktion behebt den
+RPC-Fehler noch nicht.
+
 ## Integrationsbild
 
 Der frontal ausgerichtete 3D-Dimmer mit hellem Studiountergrund wird als lokales Home-Assistant-Brand-Asset in
@@ -171,6 +219,8 @@ Die Dateien müssen so liegen, ohne einen zusätzlichen ZIP-Ordner dazwischen:
       wizard.py
       device_controls.py
       sensor.py
+      diagnostics.py
+      rpc_diagnostics.py
       const.py
       helpers.py
       rpc.py

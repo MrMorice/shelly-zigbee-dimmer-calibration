@@ -1,8 +1,8 @@
-# Prüfung · 17. Oktober 2026
+# Prüfung · 18. Oktober 2026
 
 - Home Assistant Core: **2026.10.2**, Python 3.14.4
 - ZHA: **2.3.1**, zha-quirks: **2.3.0**, zigpy: **2.3.0**
-- **80 Tests bestanden**, keine fehlgeschlagenen Tests.
+- **96 Tests bestanden**, keine fehlgeschlagenen Tests.
 - Fünf Deprecation-Warnungen stammen aus Home Assistant und backoff.
 
 Geprüft wurden Zigbee-Nachrichten mit echten zigpy-ZCL-Serialisierern,
@@ -84,3 +84,30 @@ Statusaktualisierung nach Freigabe der Sitzungssperre und Schutz eines
 laufenden Versuchs vor einem zweiten Start. Die Einordnung in den Bereich
 Konfiguration wird über EntityCategory.CONFIG vorgegeben; ein visueller Test
 im Browser des Green wurde nicht durchgeführt.
+
+
+Version 0.2.2 ergänzt 16 Tests für die gezielte RPC-Diagnose. Der neue Knopf
+„Zigbee-RPC prüfen“ sendet ausschließlich `Light.GetConfig`; Tests prüfen,
+dass keine Dimmwerte, Lampenhelligkeiten oder lokalen Wiederherstellungsdaten
+verändert werden und keine Wiederherstellung angestoßen wird. Fehlende
+RxCtl-Antwort, RxCtl=0, ausbleibende Data-Antwort, nur teilweise empfangene Daten,
+falsches Profil, falsche RPC-ID und fehlende Zielkennung werden mit echten
+ZCL-Serialisierern an einer simulierten Mailbox unterschieden. Vollständige
+Antworten, explizite RPC-Fehler und fehlende Dimmparameter haben eigene Ergebnisse.
+
+Zusätzlich geprüft: Sperren bei aktivem Versuch, laufendem Zigbee-Vorgang,
+ausstehender Wiederherstellung und Kalibrierungssperrzeit; begrenzte
+Headerproben; Export als Statusattribut und Integrationsdiagnose ohne
+Konfigurationsnutzdaten oder Geräteadressen. Die Headerzuordnung wurde nicht
+gelockert und RPC-Anfragen werden nicht automatisch wiederholt. Die letzten
+zwölf Headerproben und alle Zähler sind Beobachtungen am Home-Assistant-Empfang,
+kein unabhängiger Funkmitschnitt und kein alleiniger Beweis für einen
+Firmwarefehler. Laufende Prüfungen und Ergebnisse werden nicht dauerhaft
+in .storage gespeichert.
+
+Die ursprüngliche Testumgebung enthielt ausgelagerte macOS-Cloud-Platzhalter.
+Für diese Prüfung wurden dieselben 144 Paketversionen mit Python 3.14.4 in
+einem lokalen temporären Verzeichnis wiederhergestellt. Die gesamte Testsuite
+besteht mit den oben genannten echten Core-/ZHA-/zigpy-Versionen. Ein Test
+an dem physischen Shelly mit Firmware 2.0.1 steht weiterhin aus; 0.2.2 ist
+Diagnose-Unterstützung und kein nachgewiesener Fix des RPC-Leseproblems.

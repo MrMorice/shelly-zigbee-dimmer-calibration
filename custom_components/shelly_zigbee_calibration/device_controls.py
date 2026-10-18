@@ -87,6 +87,29 @@ class DimmingControlButton(DeviceControl, ButtonEntity):
             self.runtime.notify()
 
 
+class RpcCheckButton(DeviceControl, ButtonEntity):
+    action = "rpc_check"
+    _attr_icon = "mdi:connection"
+
+    def __init__(self, ieee, device, runtime):
+        super().__init__(ieee, device, runtime, "rpc_check", "Zigbee-RPC prüfen")
+
+    @property
+    def available(self):
+        wizard = self.runtime.wizard
+        return not wizard.active and not wizard.lock.locked() and self.runtime.pending is None
+
+    @property
+    def extra_state_attributes(self):
+        return {"rpc_diagnose": self.runtime.rpc_report}
+
+    async def async_press(self):
+        try:
+            await self.runtime.check_rpc()
+        except Exception as exc:
+            raise HomeAssistantError(str(exc)) from exc
+
+
 class DimmingStatusSensor(DeviceControl, SensorEntity):
     _attr_icon = "mdi:lightbulb-auto"
 
@@ -97,6 +120,8 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
     def native_value(self):
         runtime = self.runtime
         wizard = runtime.wizard
+        if getattr(runtime, "rpc_checking", False):
+            return "Zigbee-RPC-Prüfung läuft"
         if runtime.last_error:
             return "Fehler – Details prüfen"
         if wizard.active:
@@ -106,6 +131,8 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
             return f"Gamma-Vorschau: {curve.gamma:.1f}"
         if runtime.pending is not None:
             return "Wiederherstellung ausstehend"
+        if getattr(runtime, "rpc_report", None):
+            return runtime.rpc_report["summary"]
         return "Bereit"
 
     @property
@@ -113,6 +140,7 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
         wizard = self.runtime.wizard
         curve = wizard.candidate if wizard.active else None
         return {
+            "rpc_diagnose": getattr(self.runtime, "rpc_report", None),
             "modus": wizard.mode if wizard.active else None,
             "mindestwert": curve.minimum if curve else None,
             "gamma": curve.gamma if curve else None,
@@ -123,7 +151,7 @@ class DimmingStatusSensor(DeviceControl, SensorEntity):
 
 
 def control_buttons(ieee, device, runtime):
-    return [DimmingControlButton(ieee, device, runtime, action, name) for action, name in (
+    return [RpcCheckButton(ieee, device, runtime)] + [DimmingControlButton(ieee, device, runtime, action, name) for action, name in (
         ("minimum", "Mindesthelligkeit suchen"),
         ("gamma", "Gamma-Vorschau starten"),
         ("increase", "Dimmwert erhöhen (+)"),

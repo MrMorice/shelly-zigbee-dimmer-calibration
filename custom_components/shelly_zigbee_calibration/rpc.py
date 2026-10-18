@@ -7,6 +7,8 @@ reply must never automatically start a second calibration.
 from __future__ import annotations
 
 import asyncio
+import copy
+import time
 import json
 import logging
 import struct
@@ -36,6 +38,39 @@ class ShellyRpc:
         self.phase = "Vorbereitung"
         self.may_have_started = False
         self._received_headers = []
+        self._reset_diagnostics(None)
+
+    def _reset_diagnostics(self, method):
+        self._started = time.monotonic()
+        self._diagnostics = {
+            "method": method, "status": "running", "phase": self.phase,
+            "writes_acknowledged": 0, "request_complete": False, "rxctl_read_attempts": 0,
+            "rxctl_reads_succeeded": 0, "rxctl_last": None,
+            "data_read_attempts": 0, "data_chunks": 0, "data_bytes": 0,
+            "rpc_frames": 0, "rpc_frames_unmatched": 0,
+            "rpc_id_mismatches": 0, "rpc_dst_missing": 0,
+            "rpc_dst_mismatches": 0, "ignored_zcl": {}, "zcl_samples": [],
+        }
+
+    @property
+    def diagnostics(self):
+        report = copy.deepcopy(self._diagnostics)
+        report["phase"] = self.phase
+        report["elapsed_seconds"] = round(time.monotonic() - self._started, 2)
+        return report
+
+    def _ignore(self, reason):
+        counters = self._diagnostics["ignored_zcl"]
+        counters[reason] = counters.get(reason, 0) + 1
+
+    def _sample(self, profile, src_ep, dst_ep, message):
+        # Keep headers only, never JSON/configuration payload or device addresses.
+        header_size = 5 if message and message[0] & 0x04 else 3
+        samples = self._diagnostics["zcl_samples"]
+        samples.append({"profile": f"0x{profile:04x}", "src_ep": src_ep,
+            "dst_ep": dst_ep, "header": message[:header_size].hex(),
+            "bytes": len(message), "phase": self.phase})
+        del samples[:-12]
 
     def handle_message(self, sender, profile, cluster, src_ep, dst_ep, message):
         """Receive only our exact manufacturer-specific ZCL response."""
@@ -46,23 +81,33 @@ class ShellyRpc:
             self._received_headers.append(
                 f"Profil={profile:#06x}, EP={src_ep}->{dst_ep}, Header={message[:5].hex()}"
             )
-        if (profile != self.profile or src_ep != RPC_ENDPOINT
-                or dst_ep != SOURCE_ENDPOINT or len(message) < 3):
+        self._sample(profile, src_ep, dst_ep, message)
+        if profile != self.profile:
+            self._ignore("profile")
+            return
+        if src_ep != RPC_ENDPOINT or dst_ep != SOURCE_ENDPOINT:
+            self._ignore("endpoint")
+            return
+        if len(message) < 3:
+            self._ignore("short_header")
             return
         tsn, expected_command, future = self._pending
         if future.done():
             return
         control = message[0]
         if control & 0x03 or not control & 0x08:
+            self._ignore("frame_type_or_direction")
             return
         # Some devices omit the manufacturer header in global responses. The
         # sender, APS profile/cluster/endpoints and TSN still identify our request.
         offset = 1
         if control & 0x04:
             if len(message) < 5 or int.from_bytes(message[1:3], "little") != MANUFACTURER:
+                self._ignore("manufacturer_or_short_header")
                 return
             offset = 3
         if message[offset] != tsn:
+            self._ignore("sequence")
             return
         command, payload = message[offset + 1], message[offset + 2:]
         if command == expected_command:
@@ -70,6 +115,7 @@ class ShellyRpc:
         elif command == 0x0B and len(payload) == 2:
             original = 0x02 if expected_command == 0x04 else 0x00
             if payload[0] != original:
+                self._ignore("default_response_command")
                 return
             if payload[1] != 0:
                 future.set_exception(RpcError(
@@ -83,6 +129,8 @@ class ShellyRpc:
                 future.set_exception(RpcError(
                     f"Shelly bestätigt Lesezugriff ohne Daten bei {self.phase}"
                 ))
+        else:
+            self._ignore("command")
 
     async def _exchange(self, command, payload, response_command):
         tsn = self.device.get_sequence()
@@ -113,8 +161,15 @@ class ShellyRpc:
         )
         if reply != b"\x00":
             raise RpcError("Zigbee-Schreibzugriff abgelehnt: " + reply.hex())
+        self._diagnostics["writes_acknowledged"] += 1
 
     async def _read(self, attribute, datatype):
+        if attribute == 2:
+            self.phase = f"{self._diagnostics['method']}: RxCtl lesen (Antwortlänge)"
+            self._diagnostics["rxctl_read_attempts"] += 1
+        elif attribute == 0:
+            self.phase = f"{self._diagnostics['method']}: Data lesen (Antwortdaten)"
+            self._diagnostics["data_read_attempts"] += 1
         reply = await self._exchange(0x00, struct.pack("<H", attribute), 0x01)
         if len(reply) < 3 or int.from_bytes(reply[:2], "little") != attribute:
             raise RpcError("Unerwartete Zigbee-Attributantwort")
@@ -124,10 +179,17 @@ class ShellyRpc:
             raise RpcError("Unerwarteter Zigbee-Datentyp")
         value = reply[4:]
         if datatype == 0x23 and len(value) == 4:
-            return int.from_bytes(value, "little")
+            number = int.from_bytes(value, "little")
+            if attribute == 2:
+                self._diagnostics["rxctl_reads_succeeded"] += 1
+                self._diagnostics["rxctl_last"] = number
+            return number
         if datatype == 0x42 and value and value[0] != 0xFF:
             size = value[0]
             if len(value) == size + 1:
+                if attribute == 0:
+                    self._diagnostics["data_chunks"] += 1
+                    self._diagnostics["data_bytes"] += size
                 return value[1:]
         raise RpcError("Unvollständige Zigbee-Attributantwort")
 
@@ -146,6 +208,7 @@ class ShellyRpc:
             raise RpcError("Shelly hat keine gültige JSON-Antwort geliefert") from exc
         if not isinstance(frame, dict):
             raise RpcError("Ungültiger Shelly-RPC-Antworttyp")
+        self._diagnostics["rpc_frames"] += 1
         return frame
 
     async def call(self, method, params):
@@ -154,6 +217,7 @@ class ShellyRpc:
         Configuration must never use the calibration-only fire-and-forget path.
         A ZCL write success alone cannot establish RPC acceptance.
         """
+        self._reset_diagnostics(method)
         request_id = uuid.uuid4().int & 0x7FFFFFFF
         source = "ha-dim-" + uuid.uuid4().hex[:8]
         payload = json.dumps({"id": request_id, "src": source,
@@ -171,6 +235,7 @@ class ShellyRpc:
                 if offset + len(chunk) == len(payload):
                     self.may_have_started = True
                 await self._write(0, 0x42, bytes([len(chunk)]) + chunk)
+            self._diagnostics["request_complete"] = True
             self.phase = method + ": RPC-Antwort lesen"
             async with asyncio.timeout(self.response_timeout):
                 stale = 0
@@ -181,21 +246,41 @@ class ShellyRpc:
                         continue
                     frame = await self._read_frame(size)
                     if frame.get("id") != request_id or frame.get("dst") != source:
+                        self._diagnostics["rpc_frames_unmatched"] += 1
+                        if frame.get("id") != request_id:
+                            self._diagnostics["rpc_id_mismatches"] += 1
+                        if "dst" not in frame:
+                            self._diagnostics["rpc_dst_missing"] += 1
+                        elif frame.get("dst") != source:
+                            self._diagnostics["rpc_dst_mismatches"] += 1
                         stale += 1
                         if stale > 8:
                             raise RpcError("Zu viele fremde RPC-Antworten")
                         continue
                     if "error" in frame:
+                        self._diagnostics["rpc_error_received"] = True
+                        detail = frame["error"]
+                        code = detail.get("code") if isinstance(detail, dict) else None
+                        if type(code) is int:
+                            self._diagnostics["rpc_error_code"] = code
                         raise RpcError("Shelly-RPC-Fehler: " + json.dumps(frame["error"], ensure_ascii=False))
                     if "result" not in frame:
                         raise RpcError("Shelly-RPC-Antwort enthält kein Ergebnis")
+                    self._diagnostics["status"] = "complete"
                     return frame["result"]
         except TimeoutError as exc:
+            self._diagnostics["status"] = "timeout"
             raise RpcError(
                 f"Keine vollständige Zigbee-RPC-Antwort bei {self.phase}. "
                 "Für den Assistenten müssen Shelly-Einstellungen über Zigbee lesbar sein. "
                 "Bei fehlenden Antworten ist die Wiederherstellung nicht bestätigt."
             ) from exc
+        except asyncio.CancelledError:
+            self._diagnostics["status"] = "cancelled"
+            raise
+        except Exception:
+            self._diagnostics["status"] = "error"
+            raise
         finally:
             self.app.remove_listener(self)
 
@@ -205,6 +290,7 @@ class ShellyRpc:
         Known Shelly firmware does not return RPC Data reads. Normal operation
         therefore validates ZCL writes only and makes no claim of RPC acceptance.
         """
+        self._reset_diagnostics("Light.Calibrate")
         request_id = uuid.uuid4().int & 0x7FFFFFFF
         source = "ha-cal-" + uuid.uuid4().hex[:8]
         payload = json.dumps({
